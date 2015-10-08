@@ -1310,17 +1310,17 @@ namespace smt {
         inf_numeral& max_gain, // maximal possible gain on x_j
         bool& has_shared,      // determine if pivot involves shared variable
         theory_var& x_i) {     // base variable to pivot with x_j
-        
+
+        context& ctx = get_context();
+        x_i = null_theory_var;
+        init_gains(x_j, inc, min_gain, max_gain);
+        has_shared |= ctx.is_shared(get_enode(x_j));
         if (is_int(x_j) && !get_value(x_j).is_int()) {
             return false;
-        }
-        x_i = null_theory_var;
-        context& ctx = get_context();
+        }        
         column & c   = m_columns[x_j];
         typename svector<col_entry>::iterator it  = c.begin_entries();
         typename svector<col_entry>::iterator end = c.end_entries();
-        init_gains(x_j, inc, min_gain, max_gain);
-        has_shared |= ctx.is_shared(get_enode(x_j));
         bool empty_column = true;
         for (; it != end; ++it) {
             if (it->is_dead()) continue;
@@ -1407,7 +1407,6 @@ namespace smt {
 
         SASSERT(max_gain.is_minus_one() || !max_gain.is_neg());
         SASSERT(min_gain.is_minus_one() || min_gain.is_one());
-        SASSERT(!is_int(x) || max_gain.is_int());
         SASSERT(is_int(x) == min_gain.is_one());
 
     }
@@ -1556,7 +1555,7 @@ namespace smt {
 
                 SASSERT(!picked_var || safe_gain(curr_min_gain, curr_max_gain));
                 
-                if (!picked_var && r.size() > 1) {
+                if (!picked_var) { //  && (r.size() > 1 || !safe_gain(curr_min_gain, curr_max_gain))
                     TRACE("opt", tout << "no variable picked\n";);
                     best_efforts++;
                 }
@@ -1594,6 +1593,13 @@ namespace smt {
             TRACE("opt", tout << "after traversing row:\nx_i: v" << x_i << ", x_j: v" << x_j << ", gain: " << max_gain << "\n";
                   tout << "best efforts: " << best_efforts << " has shared: " << has_shared << "\n";);
             
+            if (x_j == null_theory_var && x_i == null_theory_var) {
+                has_shared = false;
+                best_efforts = 0;
+                result = UNBOUNDED;
+                break;
+            }
+
             if (x_j == null_theory_var) {
                 TRACE("opt", tout << "row is " << (max ? "maximized" : "minimized") << "\n";
                       display_row(tout, r, true););

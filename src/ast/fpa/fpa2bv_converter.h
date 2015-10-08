@@ -55,8 +55,8 @@ protected:
 
     obj_map<func_decl, expr*>  m_const2bv;
     obj_map<func_decl, expr*>  m_rm_const2bv;
-    obj_map<func_decl, func_decl*>  m_uf2bvuf;        
-    obj_map<func_decl, func_decl_triple>  m_uf23bvuf;
+    obj_map<func_decl, func_decl*>  m_uf2bvuf;
+    obj_hashtable<func_decl>   m_decls_to_hide;
     
 public:
     fpa2bv_converter(ast_manager & m);    
@@ -68,7 +68,7 @@ public:
 
     bool is_float(sort * s) { return m_util.is_float(s); }
     bool is_float(expr * e) { return is_app(e) && m_util.is_float(to_app(e)->get_decl()->get_range()); }
-    bool is_rm(expr * e) { return m_util.is_rm(e); }
+    bool is_rm(expr * e) { return is_app(e) && m_util.is_rm(e); }
     bool is_rm(sort * s) { return m_util.is_rm(s); }
     bool is_float_family(func_decl * f) { return f->get_family_id() == m_util.get_family_id(); }
 
@@ -137,6 +137,10 @@ public:
     void mk_to_real(func_decl * f, unsigned num, expr * const * args, expr_ref & result);    
 
     void set_unspecified_fp_hi(bool v) { m_hi_fp_unspecified = v; }
+
+    virtual expr_ref mk_min_unspecified(func_decl * f, expr * x, expr * y);
+    virtual expr_ref mk_max_unspecified(func_decl * f, expr * x, expr * y);
+
     expr_ref mk_to_ubv_unspecified(unsigned width);
     expr_ref mk_to_sbv_unspecified(unsigned width);
     expr_ref mk_to_real_unspecified();
@@ -144,7 +148,7 @@ public:
     obj_map<func_decl, expr*> const & const2bv() const { return m_const2bv; }
     obj_map<func_decl, expr*> const & rm_const2bv() const { return m_rm_const2bv; }
     obj_map<func_decl, func_decl*> const & uf2bvuf() const { return m_uf2bvuf; }
-    obj_map<func_decl, func_decl_triple> const & uf23bvuf() const { return m_uf23bvuf; }
+    obj_hashtable<func_decl> const & decls_to_hide() const { return m_decls_to_hide; }
 
     void reset(void);
 
@@ -186,7 +190,11 @@ protected:
         expr_ref & c_sgn, expr_ref & c_sig, expr_ref & c_exp, expr_ref & d_sgn, expr_ref & d_sig, expr_ref & d_exp,
         expr_ref & res_sgn, expr_ref & res_sig, expr_ref & res_exp);
 
-    app * mk_fresh_const(char const * prefix, unsigned sz);    
+    app * mk_fresh_const(char const * prefix, unsigned sz);
+
+    void mk_to_bv(func_decl * f, unsigned num, expr * const * args, bool is_signed, expr_ref & result);
+
+    void mk_uninterpreted_output(sort * rng, func_decl * fbv, expr_ref_buffer & new_args, expr_ref & result);
 };
 
 #endif
