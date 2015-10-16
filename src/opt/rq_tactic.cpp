@@ -85,6 +85,7 @@ public:
 		stack.push_back(f.get());
 		expr_ref_vector gs(m);
 		obj_map<expr, unsigned> e2g;
+		bv_util bu(m);
 
 		while (!stack.empty()) {
 			curr = stack.back();
@@ -107,17 +108,26 @@ public:
 					const unsigned nid = gs.size();
 					gs.push_back(a);
 					e2g.insert(a, nid);
+					out << "//" << mk_ismt2_pp(a, m, 0) << endl;
 					out << "g" << nid << "=";
 					if (m.is_true(a)) out << "T";
 					else if (m.is_false(a)) out << "F";
-					else if (m.is_or(a)) out << "OR";
-					else if (m.is_and(a)) out << "AND";
-					else SASSERT(0);
+					else if (m.is_or(a)) out << "OR ";
+					else if (m.is_and(a)) out << "AND ";
+					else if (m.is_not(a)) out << "-";
+					else if (bu.is_zero(a)) out << "0";
+					else if (bu.is_allone(a)) out << "1";
+					else if (m.is_eq(a)) out << " -xor ";
+					else {
+						SASSERT(a->get_num_args() == 0);
+						//SASSERT(m.is_ground(a));
+						out << a->get_decl()->get_name();
+					}
+					//else SASSERT(0);
 					for (unsigned i = 0; i < a->get_num_args(); ++i) {
-						out << " g";
-						out << e2g[(a->get_args())[i]];
+						out << "g"<<e2g[(a->get_args())[i]]<<" ";
 					}					
-					out << endl;
+					if(1||a->get_num_args()) out << endl;
 					visited.mark(curr, true);
 					stack.pop_back();
 				}							
