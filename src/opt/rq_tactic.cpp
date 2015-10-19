@@ -226,19 +226,21 @@ public:
 					//out << "// new v " << vid << endl;
 					vnames.push_back(vid);
 				}
+
+				const unsigned psz = prefix.size();
+				prefix.resize(psz + 1);
+				prefix[psz].qt = (q->is_exists() ? "exists" : "forall");
+				for (unsigned i = q->get_num_decls(); i;) {
+					prefix[psz].vars.push_back(getvname(--i, vnames));
+				}
+
 				const unsigned oldsz = vnames.size();
 				const int bid = prn(m, gid, vid, decls, vnames,b);
 				SASSERT(oldsz == vnames.size());
 				//incgid(gid);
 				//e2g.insert(q, gid);
 				e2g.insert(q, bid);
-				const unsigned psz = prefix.size();
-				prefix.resize(psz + 1);
-				prefix[psz].qt = (q->is_exists() ? "exists" : "forall");
-				prefix[psz].b = bid;				
-				for (unsigned i = q->get_num_decls(); i;) {
-					prefix[psz].vars.push_back(getvname(--i, vnames));
-				}
+				prefix[psz].b = bid;
 
 				for (unsigned i = 0; i < q->get_num_decls(); ++i) {
 					vnames.pop_back();
