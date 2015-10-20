@@ -17,12 +17,14 @@
 #include"ufbv_tactic.h"
 #include"model_smt2_pp.h"
 #include"model_evaluator.h"
+#include"smt_tactic.h"
+#include"smt_solver.h"
 
 using std::cout;
 using std::endl;
 
 
-inline solver* mk_sat_solver(bool uf, ast_manager& m, params_ref& p);
+inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& p);
 
 
 class q2_tactic : public tactic {
@@ -108,6 +110,13 @@ private:
 		inline lbool operator() () {
 			const lbool retv = sat->check_sat(0, NULL);
 			if (retv == l_true) sat->get_model(cand_model);
+			//cand_model->get_func_interp
+			model_smt2_pp(cout << "cand:\n", m, *cand_model, 2);
+			for (unsigned i = 0; i < cand_model->get_num_functions(); ++i) {
+				func_decl * const cd = cand_model->get_function(i);
+				cout << "cand fun:" << mk_ismt2_pp(cd, m, 0) << endl;
+					//<< mk_ismt2_pp(cand_model->get_func_interp(cd), m, 2);
+			}
 			return retv;
 		}
 
@@ -168,16 +177,17 @@ private:
 		const model_ref get_model() const { return model; }
 
 		lbool operator() (model_ref cand) {
-			return run_it(cand);
+			return run_nit(cand);
 		}
 
 		lbool run_nit(model_ref cand) {
-			model_smt2_pp(cout << "cand_m\n", m, *cand, 2);
-			scoped_ptr<solver> cex_sat1=mk_sat_solver(true,m,p);
 			expr_ref ns(m);
 			model_evaluator me(*cand);
 			me(nmx, ns);
+			model_smt2_pp(cout << "cand_m\n", m, *cand, 2);
+			cout << "nit nmx\n " << mk_ismt2_pp(nmx, m, 2) << endl;
 			cout << "nit ns\n " << mk_ismt2_pp(ns, m, 2) << endl;
+			scoped_ptr<solver> cex_sat1 = mk_sat_solver(true, m, p);
 			cex_sat1->assert_expr(ns);
 			const lbool res = cex_sat1->check_sat(0,NULL);
 			if (res == l_true) cex_sat1->get_model(model);
@@ -268,11 +278,19 @@ private:
 			process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
 			// get matrix and forall quant
 			quantifier_hoister hoister(m);
-			expr_ref _matrix(m);
-			bool is_forall;
-
-			hoister(in_f, forall_decls, is_forall, _matrix);
-			SASSERT(is_forall || forall_decls.empty()); // TODO: exception?
+			expr_ref _matrix(in_f,m);
+			while (1) {
+				cout << "_mx:\n" << mk_ismt2_pp(_matrix, m, 2) << endl;
+				expr_ref tmp(m);
+				app_ref_vector tmp_vs(m);
+				bool is_forall;
+				hoister(_matrix, tmp_vs, is_forall, tmp);				
+				if (tmp_vs.empty()) break;
+				SASSERT(is_forall); // TODO: exception?
+				if (!is_forall) return;
+				forall_decls.append(tmp_vs);
+				_matrix = tmp;
+			}
 
 			cout << "F";
 			for (unsigned i = 0; i < free_decls.size(); ++i)
@@ -284,7 +302,7 @@ private:
 			cout << endl;
 		
 			simp(_matrix, matrix);
-			//cout << "mx:\n" << mk_ismt2_pp(matrix, m, 0) << endl;
+			cout << "mx:\n" << mk_ismt2_pp(matrix, m, 0) << endl;
 			//
 		}
 
@@ -301,9 +319,11 @@ private:
 				const lbool sat_res = cands(); // get cand
 				cout << "cand_res: " << sat_res << endl;
 				if (sat_res == l_false) { retv = l_false; break; }
+				if (sat_res == l_undef) { retv = l_undef; break; }
 				const lbool cex_res = cexs(cands.get_model()); // get cex
 				cout << "cex_res: " << cex_res << endl;
 				if (cex_res == l_false) { retv = l_true; break; }
+				if (sat_res == l_undef) { retv = l_undef; break; }
 				cands.refine(cexs.get_model());
 			}
 			return retv;
@@ -336,13 +356,19 @@ private:
 	};
 };
 
-inline solver* mk_sat_solver(bool uf, ast_manager& m, params_ref& p) {
+inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
+	params_ref p;
+	p.copy(_p);
 	if (!uf) return  mk_inc_sat_solver(m, p);
-	tactic_ref cext = mk_ufbv_tactic(m, p);
-	solver* rv = mk_tactic2solver(m, cext.get(), p);
-	SASSERT(rv);
-	rv->set_produce_models(true);
-	return rv;
+	return mk_smt_solver(m,p, symbol("UFBV"));
+	//p.set_bool("auto_config", true);
+	//tactic_ref cext = mk_smt_tactic(p);
+	//cext->set_logic(symbol("UFBV"));
+	////mk_ufbv_tactic(m, p);
+	//solver* rv = mk_tactic2solver(m, cext.get(), p);
+	//SASSERT(rv);
+	//rv->set_produce_models(true);
+	//return rv;
 }
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
