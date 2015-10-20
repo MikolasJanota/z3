@@ -202,7 +202,7 @@ namespace nlsat {
         void reset_already_added() {
             SASSERT(m_result != 0);
             unsigned sz = m_result->size();
-            for (unsigned i = 0; i < sz; i++)
+            for (unsigned i = 0; i < sz; i++) 
                 m_already_added_literal[(*m_result)[i].index()] = false;
         }
 
@@ -1332,10 +1332,55 @@ namespace nlsat {
             TRACE("nlsat_explain", tout << "[explain] result\n"; display(tout, result););
             CASSERT("nlsat", check_already_added());
         }
+
+        void project(var x, unsigned num, literal const * ls, scoped_literal_vector & result) {
+            m_result = &result;
+            DEBUG_CODE(
+                for (unsigned i = 0; i < num; ++i) {
+                    atom* a = m_atoms[ls[i].var()];
+                    SASSERT(m_evaluator.eval(a, ls[i].sign()));
+                });
+            svector<literal> lits;
+            split_literals(x, num, ls, lits, result);
+            collect_polys(lits.size(), lits.c_ptr(), m_ps);
+            var mx_var = max_var(m_ps);
+            svector<var> renaming;
+            if (x != mx_var) {
+                for (var i = 0; i < m_solver.num_vars(); ++i) {
+                    renaming.push_back(i);
+                }
+                std::swap(renaming[x], renaming[mx_var]);
+                m_solver.reorder(renaming.size(), renaming.c_ptr());
+            }
+            elim_vanishing(m_ps);
+            project(m_ps, mx_var);
+            reset_already_added();
+            m_result = 0;
+            if (x != mx_var) {
+                m_solver.restore_order();
+            }
+            for (unsigned i = 0; i < result.size(); ++i) {
+                result.set(i, ~result[i]);
+            }
+        }
+
+        void split_literals(var x, unsigned n, literal const* ls, svector<literal>& lits, scoped_literal_vector& result) {
+            for (unsigned i = 0; i < n; ++i) {                  
+                var_vector vs;
+                m_solver.vars(ls[i], vs);
+                if (vs.contains(x)) {
+                    lits.push_back(ls[i]);
+                }
+                else {
+                    result.push_back(~ls[i]);
+                }
+            }
+        }
+
     };
 
-    explain::explain(solver & s, assignment const & x2v, polynomial::cache & u, atom_vector const & atoms, atom_vector const & x2eq,
-                     evaluator & ev) {
+    explain::explain(solver & s, assignment const & x2v, polynomial::cache & u, 
+                     atom_vector const& atoms, atom_vector const& x2eq, evaluator & ev) {
         m_imp = alloc(imp, s, x2v, u, atoms, x2eq, ev);
     }
 
@@ -1366,6 +1411,10 @@ namespace nlsat {
 
     void explain::operator()(unsigned n, literal const * ls, scoped_literal_vector & result) {
         (*m_imp)(n, ls, result);
+    }
+
+    void explain::project(var x, unsigned n, literal const * ls, scoped_literal_vector & result) {
+        m_imp->project(x, n, ls, result);
     }
 
 };
