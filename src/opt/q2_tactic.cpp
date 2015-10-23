@@ -19,6 +19,7 @@
 #include"model_evaluator.h"
 #include"smt_tactic.h"
 #include"smt_solver.h"
+#include"simplify_tactic.h"
 
 using std::cout;
 using std::endl;
@@ -44,6 +45,7 @@ public:
 		expr_dependency_ref & core) {
 		ast_manager& m(g->m());
 		ptr_vector<expr> flas;
+		g->display(cout << "Goal:\n");
 		g->get_formulas(flas);
 		imp i(m, m_p, q2_tactic::UFBV, flas);
 		const lbool o = i();
@@ -317,9 +319,6 @@ private:
 		ptr_vector<CexWrap>  cexs;
 
 		void init() {
-			// conjoin goal			
-			expr_ref const in_f(mk_and(m, fmls.size(), fmls.c_ptr()), m);
-
 			//cout << "fla:\n" << mk_ismt2_pp(in_f, m, 0) << endl;
 
 			decl_collector dc(m);
@@ -352,8 +351,9 @@ private:
 					if (tmp_vs.empty()) break;
 					SASSERT(!level || is_forall); // TODO: exception?
 					if (level && !is_forall) return;
-					if (is_forall) ++level;
+					if (level || is_forall) ++level;
 					if (level) {
+						SASSERT(is_forall);
 						forall_decls.append(tmp_vs);
 					}
 					else {
@@ -381,9 +381,9 @@ private:
 			process_free_decls(m, dc.get_func_decls(), dc.get_num_decls());
 			process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
 
-			//cout << "A";
-			//for (unsigned i = 0; i < forall_decls.size(); ++i)
-			//	cout << " " << mk_ismt2_pp(forall_decls[i].get(), m, 0);
+			cout << "F";
+			for (unsigned i = 0; i < free_decls.size(); ++i)
+				cout << "\n" << mk_ismt2_pp(free_decls[i].get(), m, 2);
 			cout << endl;
 		}
 
@@ -459,11 +459,9 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
 	return and_then(
-		//mk_simplify_tactic(m, p),
+		//mk_simplify_tactic(m, p)
 		mk_macro_finder_tactic(m, p)
-		,
-		mk_nnf_tactic(m, p)
-		, 
-		alloc(q2_tactic, m, p)
+		,mk_nnf_tactic(m, p)
+		,alloc(q2_tactic, m, p)
 		);
 }
