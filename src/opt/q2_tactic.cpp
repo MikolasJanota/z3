@@ -14,7 +14,6 @@
 #include"bv_simplifier_plugin.h"
 #include"nnf_tactic.h"
 #include"macro_finder_tactic.h"
-#include"quasi_macros_tactic.h"
 #include"qfaufbv_tactic.h"
 #include"model_smt2_pp.h"
 #include"model_evaluator.h"
@@ -34,23 +33,21 @@
 #include"bv_size_reduction_tactic.h"
 #include"ctx_simplify_tactic.h"
 
-using std::cout;
 using std::endl;
 
-
+/* used to solve by the unquantified part. */
 inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& p);
 
-
+/* CEGAR-Based approach to two level quantification problems a la AReQS. */
 class q2_tactic : public tactic {
 public:
-	enum Mode { BV, UFBV };
-
+	enum Mode { BV, UFBV }; // pure a bit-vectors or also uninterpreted functions in the matrix. 
+                                //TODO set by params
 
 	q2_tactic(ast_manager& m, params_ref const& p)
 		: m_m(m)
 		, m_p(p) {}
 
-	
 	virtual void operator()(goal_ref const & g,
 		goal_ref_buffer & result,
 		model_converter_ref & mc,
@@ -58,13 +55,16 @@ public:
 		expr_dependency_ref & core) {
 		ast_manager& m(g->m());
 		ptr_vector<expr> flas;
-		g->display(cout << "Goal:\n");
+		TRACE("q2",g->display(tout << "Goal:\n"););
 		g->get_formulas(flas);
+                // Running implementation 
 		imp i(m, m_p, q2_tactic::UFBV, flas);
 		const lbool o = i();
+                // Report result 
 		goal_ref resg(alloc(goal, *g, true));		
 		if (o == l_false) resg->assert_expr(m.mk_false());
 		if (o != l_undef) result.push_back(resg.get());
+                // TODO Report model 
 	}
 
 	virtual void cleanup() { }
@@ -76,7 +76,7 @@ private:
 	ast_manager& m_m;
 	params_ref m_p;
 
-	struct SimpWrap {
+	struct SimpWrap {// A wrapper for a formula simplifier. 
 		inline void operator() (expr * s, expr_ref & r) {
 			proof_ref dummy(m);
 			simp(s, r, dummy);
@@ -107,52 +107,65 @@ private:
 		array_simplifier_plugin asp;
 	};
 
-
+        // A wrapper for the solver used to obtain counterexamples,
+        // i.e. moves for the universal player, given a move for existential.
 	class CexWrap {
 	public:
-		CexWrap(ast_manager&m, params_ref p,
-			Mode& mode)
+		CexWrap(ast_manager&m, params_ref p, Mode mode)
 			: m(m)
+            , mode(mode)
 			, p(p)
-			, nmx(m)
-			, cex_sat(mk_sat_solver(mode == UFBV, m, p))
+			, nmx(NULL,m)
+			, cex_sat(mode==BV ? mk_sat_solver(false, m, p) : NULL)
 			, dummy(m)
 			, forall_decls(m)
-		{
-			//cex_sat->assert_expr(ncmx);
-		}
+		{ }
 
-		const model_ref get_model() const { return model; }
-
+                
+        // register forall variables
 		void add_forall(const app_ref_vector& fas) {
 			forall_decls.append(fas);
 		}
 
-		const app_ref_vector& get_forall() const { return forall_decls; }
+        // set the value of the negated matrix
+		void set_nmx(expr_ref e) {
+			SASSERT(!nmx.get());
+			nmx = e;
+			if (mode == BV) cex_sat->assert_expr(nmx);
+		}
 
-
-		void set_nmx(expr_ref e) { nmx = e; }
-		expr_ref get_nmx() const { return nmx; }
-
+		// calculate a counter example for a given existential assignment
+		// return l_true if such found; return l_false if such does not exist
 		lbool operator() (model_ref cand) {
+			SASSERT(nmx.get());
 			return run_nit(cand);
 		}
 
-		lbool run_nit(model_ref cand) {
+		const model_ref get_model() const { return model; }
+
+		const app_ref_vector& get_forall() const { return forall_decls; }
+
+		expr_ref get_nmx() const { return nmx; }
+	private:
+		lbool run_nit(model_ref cand) {// non incremental implementation
+						// substitute the candidate into the negated matrix
 			expr_ref ns(m);
 			model_evaluator me(*cand);
 			me(nmx, ns);
-			model_smt2_pp(cout << "cand_m(\n", m, *cand, 2); cout << "\n)\n";
-			cout << "nit nmx\n " << mk_ismt2_pp(nmx, m, 2) << endl;
-			cout << "nit ns\n " << mk_ismt2_pp(ns, m, 2) << endl;
-			scoped_ptr<solver> cex_sat1 = mk_sat_solver(true, m, p);
-			cex_sat1->assert_expr(ns);
-			const lbool res = cex_sat1->check_sat(0, NULL);
-			if (res == l_true) cex_sat1->get_model(model);
+			TRACE("q2",
+				model_smt2_pp(tout << "cand_m(\n", m, *cand, 2); tout << ")\n";
+			    tout << "nit nmx(\n" << mk_ismt2_pp(nmx, m, 2) << ")\n";
+     			tout << "nit ns(\n" << mk_ismt2_pp(ns, m, 2) << ")\n"; );
+			// run SAT
+			scoped_ptr<solver> cex_sat_tmp = mk_sat_solver(true, m, p);
+			cex_sat_tmp->assert_expr(ns);
+			const lbool res = cex_sat_tmp->check_sat(0, NULL);
+			if (res == l_true) cex_sat_tmp->get_model(model);
 			return res;
 		}
 
-		lbool run_it(model_ref cand) {
+		lbool run_it(model_ref cand) {// incremental implementation
+                        //TODO: works?
 			assum.reset();
 			model.reset();
 			dummy.reset();
@@ -165,6 +178,7 @@ private:
 		}
 	private:
 		ast_manager& m;
+		Mode mode;
 		params_ref p;
 		expr_ref nmx;
 		scoped_ptr<solver> cex_sat;
@@ -182,7 +196,6 @@ private:
 				SASSERT(cd->get_arity() == 0);
 				expr* ci = sat_m->get_const_interp(cd);
 				if (!ci) ci = m.get_some_value(cd->get_range());
-				//cout << "cand: " << cd->get_name() << ":\n" << mk_ismt2_pp(ci, m, 2) << endl;
 				const expr_ref a(m.mk_eq(m.mk_const(cd), ci), m);
 				cand.push_back(a);
 				assum.push_back(a.get());
@@ -191,6 +204,8 @@ private:
 	};
 
 
+        // A wrapper for the solver used to obtain candidates,
+        // i.e. moves for the existential player.
 	class CandWrap {
 	public:
 		CandWrap(ast_manager& m, params_ref p, Mode& mode)
@@ -200,8 +215,38 @@ private:
 			, simp(m)
 		{  }
 
-		~CandWrap() { }
 
+		// register an existential variable.
+		inline void add_ex(func_decl * ex) {
+			ex_decls.push_back(ex);
+		}
+
+		// assert an expression that must be always true (used for expressions with no universal variables) 
+		void assert(expr *  e) {
+			sat->assert_expr(e);
+		}
+
+		// refine based on a counter example 
+		void refine(const CexWrap * cex) {
+			SASSERT(cex);
+			model_ref cex_m(alloc(model, m));
+			expr_substitution subst(m);
+			mk_model(cex->get_model().get(), cex->get_forall(), cex_m);
+			mk_subs(cex->get_forall(), cex_m, subst);
+			expr_ref rf(m.mk_not(cex->get_nmx()), m);
+			refine(rf, cex_m.get(), &subst);
+		}
+
+		// initial random refinement, i.e. cex has no model
+		void init_refine(const CexWrap * cex) {
+			SASSERT(cex);
+			model_ref cex_m(alloc(model, m));
+			mk_model(NULL, cex->get_forall(), cex_m);
+			expr_ref rf(m.mk_not(cex->get_nmx()), m);
+			refine(rf, cex_m.get(), NULL);
+		}
+
+		//TODO: Make sure that only registered variables are in the model.
 		const model_ref get_model() const { return cand_model; }
 
 		inline lbool operator() () {
@@ -210,14 +255,11 @@ private:
 			return retv;
 		}
 
-		inline void add_ex(func_decl * ex) {
-			ex_decls.push_back(ex);
-		}
+	private:
 
-		void assert(expr *  e) {
-			sat->assert_expr(e);
-		}
-
+		//Make sure that we have a model that assigns to those and only those 
+		//variables that are universally qualified. 
+		// If model is NULL, values are guessed. 
 		void mk_model(const model *  _cex_m,
 			const app_ref_vector& forall_decls,
 			/*out*/model_ref cex_m) {
@@ -234,15 +276,16 @@ private:
 					cex_m->register_decl(cd, ci);
 				}
 			}
-			model_smt2_pp(cout << "cex_m\n", m, *(cex_m.get()), 2);
+			TRACE("q2", model_smt2_pp(tout << "cex_m\n", m, *(cex_m.get()), 2););
 		}
 
+		// Try to come up with clever substitutions based on a counter examples and a candidate. 
+		// Currently just a hack that looks for identical bv values and maps the corresponding variables. 
 		void mk_subs(
 			const app_ref_vector& forall_decls,
 			model_ref cex_m,
 			/*out*/expr_substitution& subst) {			
 			bv_util bu(m);
-			///////////////
 			for (unsigned i = 0; i < forall_decls.size(); ++i) {
 				app * const ac = forall_decls.get(i);
 				func_decl * const a = ac->get_decl();
@@ -254,7 +297,7 @@ private:
 					if (!bu.is_bv_sort(b->get_range())) continue;
 					if (cex_m->get_const_interp(a) !=
 						cand_model->get_const_interp(b)) continue;
-					cout << "m:\n" << mk_ismt2_pp(a, m, 0) << "->" << mk_ismt2_pp(b, m, 0) << endl;
+                                        TRACE("q2",tout << "m:\n" << mk_ismt2_pp(a, m, 0) << "->" << mk_ismt2_pp(b, m, 0) << endl;);
 					subst.erase(ac);
 					app * const bc = m.mk_const(b);
 					subst.insert(ac, bc);
@@ -263,50 +306,34 @@ private:
 			}
 		}
 
-		void refine(const CexWrap * cex) {
-			SASSERT(cex);
-			model_ref cex_m(alloc(model, m));
-			expr_substitution subst(m);
-			mk_model(NULL, cex->get_forall(), cex_m);
-			mk_subs(cex->get_forall(), cex_m, subst);
-			expr_ref rf(m.mk_not(cex->get_nmx()), m);
-			refine(rf, cex_m.get(), &subst);
-		}
 
-		void init_refine(const CexWrap * cex) {
-			SASSERT(cex);
-			model_ref cex_m(alloc(model, m));
-			mk_model(NULL, cex->get_forall(), cex_m);
-			expr_ref rf(m.mk_not(cex->get_nmx()), m);
-			refine(rf, cex_m.get(), NULL);
-		}
-
+        // Refine based on a model and a substitution. The substitution is applied first. 
 		void refine(expr_ref rf, model * cex_m, expr_substitution * subst) {
-			//calculate refinement		
+			//calculate refinement
 			expr_ref ref(m);
 			expr_ref tmp(m);
 			ref = rf;
-			cout << "ref0: " << mk_ismt2_pp(ref, m, 2) << endl;
-			if (subst) {
+			TRACE("q2",tout << "ref0: " << mk_ismt2_pp(ref, m, 2) << endl;);
+			if (subst) {// apply substitution 
 				scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
 				er->set_substitution(subst);
 				(*er)(ref.get(), tmp);
 				ref = tmp;
-				cout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;
+				TRACE("q2",tout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;);
 			}
-			if (cex_m) {
+			if (cex_m) { // apply counter example 
 				model_evaluator me(*cex_m);
 				me(ref, tmp);
 				ref = tmp;
-				cout << "ref2: " << mk_ismt2_pp(ref, m, 2) << endl;
+				TRACE("q2",tout << "ref2: " << mk_ismt2_pp(ref, m, 2) << endl;);
 			}
 			//simplify refinement
-			simp(ref, tmp);
-			ref = tmp;
-			cout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;
+			//simp(ref, tmp);
+			//ref = tmp;
+			//TRACE("q2",tout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;);
+            // plug into solver 
 			sat->assert_expr(ref);
 		}
-
 	private:
 		ast_manager& m;
 		func_decl_ref_vector ex_decls;
@@ -317,7 +344,7 @@ private:
 
 
 
-
+        // Implementation of the CEGAR loop.
 	class imp {
 	public:
 		imp(ast_manager& m, params_ref p, Mode mode,
@@ -356,37 +383,37 @@ private:
 		SimpWrap simp;
 
 		CandWrap cands;
-		ptr_vector<CexWrap>  cexs;
+		ptr_vector<CexWrap>  cexs; // Maintain a counter-example generator for each formula (A X. F)
 
 		bool init() {
-			//cout << "fla:\n" << mk_ismt2_pp(in_f, m, 0) << endl;
-
 			decl_collector dc(m);
 			quantifier_hoister hoister(m);
 			expr_ref tmp(m);
 			app_ref_vector tmp_vs(m);
 			for (unsigned i = 0; i < fmls.size(); ++i) {				
 				expr * f = fmls[i];
-				cout << "fi:\n" << mk_ismt2_pp(f, m, 2) << endl;
+				TRACE("q2",tout << "fi:\n" << mk_ismt2_pp(f, m, 2) << endl;);
 				dc.visit(f);
+                                // pull initial existential for, which are essentially the same as free 
 				hoister.pull_exists(f, tmp_vs, tmp);
 				if (tmp_vs.size()) {
 					f = tmp;
 					for (unsigned i = 0; i < tmp_vs.size(); ++i) {
 						app * const v = tmp_vs.get(i);
 						cands.add_ex(v->get_decl());
-						cout << "E " << mk_ismt2_pp(v, m, 2) << endl;
+						TRACE("q2",tout << "E " << mk_ismt2_pp(v, m, 2) << endl;);
 					}
 					ex_decls.append(tmp_vs);
 				} 
 				unsigned level = 0;
+                                // pull universals and make sure there are no further existentials
 				app_ref_vector forall_decls(m);
 				while (1) {
 					bool is_forall;
 					tmp_vs.reset();
 					hoister(f, tmp_vs, is_forall, tmp);
 					for (unsigned i = 0; i < tmp_vs.size(); ++i) {
-						cout << (is_forall?'A':'E') << " " << mk_ismt2_pp(tmp_vs[i].get(), m, 2) << endl;
+						TRACE("q2",tout << (is_forall?'A':'E') << " " << mk_ismt2_pp(tmp_vs[i].get(), m, 2) << endl;);
 					}
 					if (tmp_vs.empty()) break;
 					SASSERT(!level || is_forall); // TODO: exception?
@@ -395,25 +422,25 @@ private:
 					if (level) {
 						SASSERT(is_forall);
 						forall_decls.append(tmp_vs);
-					}
-					else {
-						/* TODO */;
+					} else {
+                                          UNREACHABLE(); //TODO OK?
 					}
 					f = tmp;
-					cout << "f:\n" << mk_ismt2_pp(f, m, 2) << endl;
+					TRACE("q2",tout << "f:\n" << mk_ismt2_pp(f, m, 2) << endl;);
 				}
-				cout << (level ? "quant" : "no quant") << endl;
-				if (level) {
-					cexs.push_back(alloc(CexWrap, m, p, mode));
+				TRACE("q2",tout << (level ? "quant" : "no quant") << endl;);
+				if (level) {// handle quantified formula 
+					CexWrap* const cex = alloc(CexWrap, m, p, mode);
 					expr_ref nmx(m);
 					tmp = m.mk_not(f);
 					nmx = tmp;
-					simp(nmx, tmp);
+					//simp(nmx, tmp);
 					nmx = tmp;
-				    cexs.back()->add_forall(forall_decls);
-					cexs.back()->set_nmx(nmx);
+                    cex->add_forall(forall_decls);
+					cex->set_nmx(nmx);
 					//cands.init_refine(cexs.back());
-				} else {
+					cexs.push_back(cex);
+				} else {// assert an unquantified formula 
 					cands.assert(f);
 				}
 
@@ -422,31 +449,32 @@ private:
 			process_free_decls(m, dc.get_func_decls(), dc.get_num_decls());
 			process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
 
-			cout << "F";
-			for (unsigned i = 0; i < free_decls.size(); ++i)
-				cout << "\n" << mk_ismt2_pp(free_decls[i].get(), m, 2);
-			cout << endl;
+			TRACE("q2",
+                          tout << "F\n";
+			  for (unsigned i = 0; i < free_decls.size(); ++i)
+                            tout << mk_ismt2_pp(free_decls[i].get(), m, 2) << endl;
+                        ); 
+          	          
 
 			return true;
 		}
 
 		lbool cegar() {			
-			//////////////////
 			int count = 0;
-			lbool retv = l_undef;
 			while (1) {
-				cout << "it: " << ++count << endl;
+				std::cout << "it: " << ++count << endl;
 				////////////
 				const lbool sat_res = cands(); // get cand
-				cout << "cand_res: " << sat_res << endl;
+				TRACE("q2",tout << "cand_res: " << sat_res << endl;);
 				if (sat_res == l_false) { return l_false; }
 				if (sat_res == l_undef) { return l_undef; }
+                                // check if there is a counter example 
 				bool all_good = true;
 				for (unsigned i = 0; i < cexs.size(); ++i) {
 					CexWrap * const s = cexs[i];
-					const lbool cex_res = (*s)(cands.get_model()); // get cex
-					cout << "cex_res[" << i << "]: " << cex_res << endl;					
-					if (sat_res == l_undef) { return l_undef;  }
+					const lbool cex_res = (*s)(cands.get_model());
+                                        TRACE("q2",tout << "cex_res[" << i << "]: " << cex_res << endl;);
+					if (cex_res == l_undef) { return l_undef;  }
 					if (cex_res == l_false) { continue; }
 					all_good = false;
 					cands.refine(s);
@@ -456,20 +484,6 @@ private:
 			UNREACHABLE();
 			return l_undef;
 		}
-
-
-		
-		//void mk_ini_cex(expr_substitution& cex) {			
-		//	for (unsigned i = 0; i < forall_decls.size(); ++i) {
-		//		SASSERT(forall_decls[i]->get_decl()->get_arity() == 0);
-		//		sort * const s = forall_decls[i]->get_decl()->get_range();
-		//		expr_ref v(m.get_some_value(s), m);
-		//		//	ini_cex.push_back(v);
-		//		cex.insert(forall_decls[i].get(), v);
-		//		//cout << "init cex: " << mk_ismt2_pp(forall_decls[i].get(), m, 0) << " " << mk_ismt2_pp(v, m, 0) << endl;
-		//	}
-		//}
-
 
 		void process_free_decls(ast_manager& m,
 			func_decl * const * dcs,
@@ -491,7 +505,8 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
 	if (!uf) return mk_inc_sat_solver(m, p);
 	//return mk_smt_solver(m,p, symbol("UFBV"));
 	//return mk_smt_solver(m, p, symbol());
-	tactic_ref t = mk_qfaufbv_tactic(m,p);// mk_smt_tactic(p);	
+	tactic_ref t = mk_qfaufbv_tactic(m,p);
+	//tactic_ref t = mk_smt_tactic(p);	
 	solver* rv = mk_tactic2solver(m, t.get(), p);
 	rv->set_produce_models(true);
 	SASSERT(rv);
@@ -504,7 +519,6 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
 	main_p.set_bool("sort_store", true);
 	main_p.set_bool("expand_select_store", true);
 	main_p.set_bool("expand_store_eq", true);
-	
 
 	params_ref simp2_p = p;
 	simp2_p.set_bool("som", true);
@@ -517,10 +531,10 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
 	ctx_simp_p.set_uint("max_depth", 32);
 	ctx_simp_p.set_uint("max_steps", 5000000);
 
-
-	tactic * const preamble_t = and_then(mk_simplify_tactic(m),
+	tactic * const preamble_t = and_then(
+		mk_simplify_tactic(m),
 		mk_propagate_values_tactic(m),
-		using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
+		//using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
 		mk_solve_eqs_tactic(m),
 		mk_elim_uncnstr_tactic(m),
 		if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
@@ -531,5 +545,7 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
 		);
 
 
-	return and_then(preamble_t,alloc(q2_tactic, m, p));
+	return and_then(
+		preamble_t,
+		alloc(q2_tactic, m, p));
 }
