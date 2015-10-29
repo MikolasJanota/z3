@@ -261,6 +261,7 @@ namespace nlsat {
         }
 
         void inc_ref(bool_var b) {
+            TRACE("ref", tout << "inc: " << b << "\n";);
             if (b == null_bool_var)
                 return;
             if (m_atoms[b] == 0)
@@ -273,6 +274,7 @@ namespace nlsat {
         }
 
         void dec_ref(bool_var b) {
+            TRACE("ref", tout << "dec: " << b << "\n";);
             if (b == null_bool_var)
                 return;
             atom * a = m_atoms[b];
@@ -444,6 +446,8 @@ namespace nlsat {
             }
             else {
                 m_pm.vars(to_root_atom(a)->p(), vs);
+                //vs.erase(max_var(to_root_atom(a)->p()));
+                vs.push_back(to_root_atom(a)->x());
             }
         }
 
@@ -913,8 +917,7 @@ namespace nlsat {
             if (!m_assignment.is_assigned(max))
                 return l_undef;
             TRACE("value_bug", tout << "value of: "; display(tout, l); tout << "\n"; tout << "xk: " << m_xk << ", a->max_var(): " << a->max_var() << "\n";
-                  display_assignment(tout);
-                  display_bool_assignment(tout););
+                  display_assignment(tout););
             return to_lbool(m_evaluator.eval(a, l.sign()));
         }
 
@@ -1195,7 +1198,7 @@ namespace nlsat {
                 }
                 TRACE("nlsat_bug", tout << "xk: x" << m_xk << " bk: b" << m_bk << "\n";);
                 if (m_bk == null_bool_var && m_xk >= num_vars()) {
-                    TRACE("nlsat", tout << "found model\n"; display_assignment(tout); display_bool_assignment(tout););
+                    TRACE("nlsat", tout << "found model\n"; display_assignment(tout););
                     return l_true; // all variables were assigned, and all clauses were satisfied.
                 }
                 TRACE("nlsat", tout << "processing variable "; 
@@ -1240,10 +1243,10 @@ namespace nlsat {
             }
             sort_watched_clauses();
             lbool r = search();
-            CTRACE("nlsat_model", r == l_true, tout << "model before restore order\n"; display_assignment(tout); display_bool_assignment(tout););
+            CTRACE("nlsat_model", r == l_true, tout << "model before restore order\n"; display_assignment(tout););
             if (m_reorder)
                 restore_order();
-            CTRACE("nlsat_model", r == l_true, tout << "model\n"; display_assignment(tout); display_bool_assignment(tout););
+            CTRACE("nlsat_model", r == l_true, tout << "model\n"; display_assignment(tout););
             return r;
         }
 
@@ -1253,6 +1256,10 @@ namespace nlsat {
                 undo_new_level();
             }
             m_xk = null_var;
+            for (unsigned i = 0; i < m_bvalues.size(); ++i) {
+                m_bvalues[i] = l_undef;
+            }
+            m_assignment.reset();
         }
 
         lbool check(literal_vector& assumptions) {
@@ -1559,7 +1566,7 @@ namespace nlsat {
             TRACE("nlsat", tout << "resolve, conflicting clause:\n"; display(tout, *conflict_clause); tout << "\n";
                   tout << "xk: "; if (m_xk != null_var) m_display_var(tout, m_xk); else tout << "<null>"; tout << "\n";
                   tout << "scope_lvl: " << scope_lvl() << "\n";
-                  tout << "current assignment\n"; display_assignment(tout); display_bool_assignment(tout););
+                  tout << "current assignment\n"; display_assignment(tout););
 
             // static unsigned counter = 0;
             // counter++;
@@ -1700,7 +1707,7 @@ namespace nlsat {
                 conflict_clause = new_cls;
                 goto start;
             }
-            TRACE("nlsat_resolve_done", display_assignment(tout); display_bool_assignment(tout););
+            TRACE("nlsat_resolve_done", display_assignment(tout););
             return true;
         }
 
@@ -2191,7 +2198,7 @@ namespace nlsat {
         //
         // -----------------------
         
-        void display_assignment(std::ostream & out, display_var_proc const & proc) const {
+        void display_num_assignment(std::ostream & out, display_var_proc const & proc) const {
             for (var x = 0; x < num_vars(); x++) {
                 if (m_assignment.is_assigned(x)) {
                     proc(out, x);
@@ -2202,7 +2209,7 @@ namespace nlsat {
             }
         }
 
-        void display_bool_assignment(std::ostream & out, display_var_proc const & proc) const {
+        void display_bool_assignment(std::ostream & out) const {
             unsigned sz = m_atoms.size();
             for (bool_var b = 0; b < sz; b++) {
                 if (m_atoms[b] == 0 && m_bvalues[b] != l_undef) {
@@ -2230,12 +2237,13 @@ namespace nlsat {
             return !first;
         }
 
-        void display_assignment(std::ostream & out) const { 
-            display_assignment(out, m_display_var);
+        void display_num_assignment(std::ostream & out) const { 
+            display_num_assignment(out, m_display_var);
         }
 
-        void display_bool_assignment(std::ostream & out) const { 
-            display_bool_assignment(out, m_display_var);
+        void display_assignment(std::ostream& out) const {
+            display_bool_assignment(out);
+            display_num_assignment(out);
         }
        
         void display(std::ostream & out, ineq_atom const & a, display_var_proc const & proc, bool use_star = false) const {
@@ -2629,6 +2637,7 @@ namespace nlsat {
 
         void display(std::ostream & out) const {
             display(out, m_display_var);
+            display_assignment(out);
         }
 
         void display_vars(std::ostream & out) const {
@@ -2725,6 +2734,10 @@ namespace nlsat {
     bool_var solver::mk_bool_var() {
         return m_imp->mk_bool_var();
     }
+    
+    literal solver::mk_true() {
+        return literal(0, false);
+    }
 
     atom * solver::bool_var2atom(bool_var b) {
         return m_imp->m_atoms[b];
@@ -2774,6 +2787,7 @@ namespace nlsat {
     void solver::set_bvalues(svector<lbool> const& vs) {
         m_imp->m_bvalues.reset();
         m_imp->m_bvalues.append(vs);
+        m_imp->m_bvalues.resize(m_imp->m_atoms.size(), l_undef);        
     }
     
     var solver::mk_var(bool is_int) {

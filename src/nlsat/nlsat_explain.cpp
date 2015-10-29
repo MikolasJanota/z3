@@ -36,6 +36,7 @@ namespace nlsat {
         polynomial::cache &     m_cache;
         pmanager &              m_pm;
         polynomial_ref_vector   m_ps;
+        polynomial_ref_vector   m_ps2;
         polynomial_ref_vector   m_psc_tmp;
         polynomial_ref_vector   m_factors;
         scoped_anum_vector      m_roots_tmp;
@@ -137,6 +138,7 @@ namespace nlsat {
             m_cache(u), 
             m_pm(u.pm()),
             m_ps(m_pm),
+            m_ps2(m_pm),
             m_psc_tmp(m_pm),
             m_factors(m_pm),
             m_roots_tmp(m_am),
@@ -1335,36 +1337,56 @@ namespace nlsat {
 
         void project(var x, unsigned num, literal const * ls, scoped_literal_vector & result) {
             m_result = &result;
+            svector<literal> lits;
+            TRACE("nlsat", tout << "project x" << x << "\n"; m_solver.display(tout););
+                  
             DEBUG_CODE(
                 for (unsigned i = 0; i < num; ++i) {
+                    SASSERT(m_solver.value(ls[i]) == l_true);
                     atom* a = m_atoms[ls[i].var()];
-                    SASSERT(m_evaluator.eval(a, ls[i].sign()));
+                    SASSERT(!a || m_evaluator.eval(a, ls[i].sign()));
                 });
-            svector<literal> lits;
-            split_literals(x, num, ls, lits, result);
+            split_literals(x, num, ls, lits);
             collect_polys(lits.size(), lits.c_ptr(), m_ps);
             var mx_var = max_var(m_ps);
-            svector<var> renaming;
-            if (x != mx_var) {
-                for (var i = 0; i < m_solver.num_vars(); ++i) {
-                    renaming.push_back(i);
+            if (!m_ps.empty()) {                
+                svector<var> renaming;
+                if (x != mx_var) {
+                    for (var i = 0; i < m_solver.num_vars(); ++i) {
+                        renaming.push_back(i);
+                    }
+                    std::swap(renaming[x], renaming[mx_var]);
+                    m_solver.reorder(renaming.size(), renaming.c_ptr());
+                    TRACE("qe", tout << "x: " << x << " max: " << mx_var << " num_vars: " << m_solver.num_vars() << "\n";
+                          m_solver.display(tout););
                 }
-                std::swap(renaming[x], renaming[mx_var]);
-                m_solver.reorder(renaming.size(), renaming.c_ptr());
+                elim_vanishing(m_ps);
+#if 0
+                signed_project(m_ps, mx_var);
+#else
+                project(m_ps, mx_var);
+#endif
+                reset_already_added();
+                m_result = 0;
+                if (x != mx_var) {
+                    m_solver.restore_order();
+                }
             }
-            elim_vanishing(m_ps);
-            project(m_ps, mx_var);
-            reset_already_added();
-            m_result = 0;
-            if (x != mx_var) {
-                m_solver.restore_order();
+            else {
+                reset_already_added();
+                m_result = 0;
             }
             for (unsigned i = 0; i < result.size(); ++i) {
                 result.set(i, ~result[i]);
             }
+            DEBUG_CODE(
+                for (unsigned i = 0; i < result.size(); ++i) {
+                    SASSERT(l_true == m_solver.value(result[i]));
+                });
+
         }
 
-        void split_literals(var x, unsigned n, literal const* ls, svector<literal>& lits, scoped_literal_vector& result) {
+        void split_literals(var x, unsigned n, literal const* ls, svector<literal>& lits) {
             for (unsigned i = 0; i < n; ++i) {                  
                 var_vector vs;
                 m_solver.vars(ls[i], vs);
@@ -1372,9 +1394,190 @@ namespace nlsat {
                     lits.push_back(ls[i]);
                 }
                 else {
-                    result.push_back(~ls[i]);
+                    add_literal(~ls[i]);
                 }
             }
+        }
+
+        /**
+           Signed projection. 
+
+           Assumptions:
+           - any variable in ps is at most x.
+           - root expressions are satisfied (positive literals)
+           
+           Effect:
+           - if x not in p, then
+              - if sign(p) < 0:   p < 0
+              - if sign(p) = 0:   p = 0
+              - if sign(p) > 0:   p > 0
+           else:
+           - let roots_j be the roots of p_j or roots_j[i] 
+           - let L = { roots_j[i] | M(roots_j[i]) < M(x) }
+           - let U = { roots_j[i] | M(roots_j[i]) > M(x) }
+           - let E = { roots_j[i] | M(roots_j[i]) = M(x) }
+           - let glb in L, s.t. forall l in L . M(glb) >= M(l)
+           - let lub in U, s.t. forall u in U . M(lub) <= M(u)
+           - if root in E, then 
+              - add E x . x = root & x > lb  for lb in L
+              - add E x . x = root & x < ub  for ub in U
+              - add E x . x = root & x = root2  for root2 in E \ { root }
+           - else 
+             - assume |L| <= |U| (other case is symmetric)
+             - add E x . lb <= x & x <= glb for lb in L
+             - add E x . x = glb & x < ub  for ub in U
+         */
+
+
+        void signed_project(polynomial_ref_vector& ps, var x) {
+            
+            polynomial_ref p(m_pm);
+            unsigned eq_index = 0;
+            bool eq_valid = false;
+            for (unsigned i = 0; i < ps.size(); ++i) {
+                p = ps.get(i);
+                int s = sign(p);
+                if (max_var(p) != x) {
+                    atom::kind k = (s == 0)?(atom::EQ):((s < 0)?(atom::LT):(atom::GT));
+                    add_simple_assumption(k, p, false);
+                    ps[i] = ps.back();
+                    ps.pop_back();
+                    --i;
+                }
+                else if (s == 0) {
+                    eq_index = i;
+                    eq_valid = true;
+                }
+            }
+
+            if (ps.empty()) {
+                return;
+            }
+
+            if (ps.size() == 1) {
+                project_single(x, ps.get(0));
+                return;
+            }
+
+            if (eq_valid) {
+                project_pairs(x, eq_index, ps);
+                return;
+            }
+            
+            unsigned num_lub = 0, num_glb = 0;
+            unsigned glb_index = 0, lub_index = 0;
+            scoped_anum lub(m_am), glb(m_am), new_x_val(m_am), x_val(m_am);
+            x_val = m_assignment.value(x);
+            for (unsigned i = 0; i < ps.size(); ++i) {
+                p = ps.get(i);
+                scoped_anum_vector & roots = m_roots_tmp;
+                roots.reset();
+                m_am.isolate_roots(p, undef_var_assignment(m_assignment, x), roots);
+                bool glb_valid = false, lub_valid = false;
+                for (unsigned j = 0; j < roots.size(); ++j) {
+                    int s = m_am.compare(x_val, roots[j]);
+                    SASSERT(s != 0);
+                    lub_valid |= s < 0;
+                    glb_valid |= s > 0;
+
+                    if (s < 0 && m_am.lt(roots[j], lub)) {
+                        lub_index = i;
+                        m_am.set(lub, roots[j]);
+                    }
+
+                    if (s > 0 && m_am.lt(glb, roots[j])) {
+                        glb_index = i;
+                        m_am.set(glb, roots[j]);
+                    }
+                }
+                if (glb_valid) {
+                    ++num_glb;
+                }
+                if (lub_valid) {
+                    ++num_lub;
+                }
+            }
+
+            if (num_lub == 0) {
+                project_plus_infinity(x, ps);
+                return;
+            }
+                
+            if (num_glb == 0) {
+                project_minus_infinity(x, ps);
+                return;
+            }
+
+            if (num_lub <= num_glb) {
+                glb_index = lub_index;
+                new_x_val = lub;
+            }
+            else {
+                new_x_val = glb;
+            }
+
+            // TBD redundant: const_cast<assignment&>(m_assignment).set(x, new_x_val);
+            project_pairs(x, glb_index, ps);
+            // TBD redundant: const_cast<assignment&>(m_assignment).set(x, x_val);
+        }
+
+        void project_plus_infinity(var x, polynomial_ref_vector const& ps) {
+            polynomial_ref p(m_pm), lc(m_pm);
+            for (unsigned i = 0; i < ps.size(); ++i) {
+                p = ps.get(i);
+                unsigned d = degree(p, x);
+                lc = m_pm.coeff(p, x, d);
+                if (!is_const(lc)) {
+                    unsigned s = sign(p);
+                    SASSERT(s != 0);
+                    atom::kind k = (s > 0)?(atom::GT):(atom::LT);
+                    add_simple_assumption(k, lc);
+                }
+            }
+        }
+
+        void project_minus_infinity(var x, polynomial_ref_vector const& ps) {
+            polynomial_ref p(m_pm), lc(m_pm);
+            for (unsigned i = 0; i < ps.size(); ++i) {
+                p = ps.get(i);
+                unsigned d = degree(p, x);
+                lc = m_pm.coeff(p, x, d);
+                if (!is_const(lc)) {
+                    unsigned s = sign(p);
+                    SASSERT(s != 0);
+                    atom::kind k;
+                    if (s > 0) {
+                        k = (d % 2 == 0)?(atom::GT):(atom::LT);
+                    }
+                    else {
+                        k = (d % 2 == 0)?(atom::LT):(atom::GT);
+                    }
+                    add_simple_assumption(k, lc);
+                }
+            }
+        }
+
+        void project_pairs(var x, unsigned idx, polynomial_ref_vector const& ps) {
+            polynomial_ref p(m_pm);
+            p = ps.get(idx);
+            for (unsigned i = 0; i < ps.size(); ++i) {
+                if (i != idx) {
+                    project_pair(x, ps.get(i), p);
+                }
+            }
+        }
+
+        void project_pair(var x, polynomial::polynomial* p1, polynomial::polynomial* p2) {
+            m_ps2.reset();
+            m_ps2.push_back(p1);
+            m_ps2.push_back(p2);
+            project(m_ps2, x);
+        }
+
+        void project_single(var x, polynomial::polynomial* p) {
+            m_ps2.reset();
+            m_ps2.push_back(p);
+            project(m_ps2, x);
         }
 
     };
