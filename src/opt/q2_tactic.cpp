@@ -14,12 +14,25 @@
 #include"bv_simplifier_plugin.h"
 #include"nnf_tactic.h"
 #include"macro_finder_tactic.h"
-#include"ufbv_tactic.h"
+#include"quasi_macros_tactic.h"
+#include"qfaufbv_tactic.h"
 #include"model_smt2_pp.h"
 #include"model_evaluator.h"
 #include"smt_tactic.h"
 #include"smt_solver.h"
+#include"array_decl_plugin.h"
+#include"simplifier_plugin.h"
+#include"basic_simplifier_plugin.h"
+#include"array_simplifier_params.h"
+#include"array_simplifier_plugin.h"
+#include"solve_eqs_tactic.h"
 #include"simplify_tactic.h"
+#include"propagate_values_tactic.h"
+#include"bit_blaster_tactic.h"
+#include"elim_uncnstr_tactic.h"
+#include"max_bv_sharing_tactic.h"
+#include"bv_size_reduction_tactic.h"
+#include"ctx_simplify_tactic.h"
 
 using std::cout;
 using std::endl;
@@ -72,9 +85,12 @@ private:
 			: m(m)
 			, simp(m)
 			, bsp(m)
-			, bvsp(m, bsp, bv_par) {
+			, bvsp(m, bsp, bv_par) 
+		    , asp(m, bsp, simp, ar_par)
+		{
 			simp.register_plugin(&bsp);
 			simp.register_plugin(&bvsp);
+			simp.register_plugin(&asp);
 			simp.enable_ac_support(true);
 		}
 
@@ -87,6 +103,8 @@ private:
 		basic_simplifier_plugin bsp;
 		bv_simplifier_params bv_par;
 		bv_simplifier_plugin bvsp;
+		array_simplifier_params ar_par;
+		array_simplifier_plugin asp;
 	};
 
 
@@ -200,31 +218,30 @@ private:
 			sat->assert_expr(e);
 		}
 
-		void refine(const CexWrap * cex) {			
-			model cex_m(m);
-			bv_util bu(m);
-			expr_substitution subst(m);
-
-			const model_ref _cex_m = cex->get_model();
-
-			//SASSERT(!_cex_m->get_num_functions() || mode==UFBV);
-			const app_ref_vector& forall_decls = cex->get_forall();
+		void mk_model(const model *  _cex_m,
+			const app_ref_vector& forall_decls,
+			/*out*/model_ref cex_m) {
+			SASSERT(cex_m.get());
 			for (unsigned i = 0; i < forall_decls.size(); ++i) {
 				func_decl * const cd = forall_decls[i]->get_decl();
 				if (cd->get_arity()) {
 					SASSERT(0);
-					func_interp* ci = _cex_m->get_func_interp(cd);
-					if (ci) cex_m.register_decl(cd, ci);
-					else /* TODO */ SASSERT(0);
+					// TODO
 				}
 				else {
-					expr* ci = _cex_m->get_const_interp(cd);
+					expr* ci = _cex_m ? _cex_m->get_const_interp(cd) : NULL;
 					if (!ci) ci = m.get_some_value(cd->get_range());
-					cex_m.register_decl(cd, ci);
-					//subst.insert(m.mk_const(cd), ci);
+					cex_m->register_decl(cd, ci);
 				}
 			}
-			model_smt2_pp(cout << "cex_m\n", m, cex_m, 2);
+			model_smt2_pp(cout << "cex_m\n", m, *(cex_m.get()), 2);
+		}
+
+		void mk_subs(
+			const app_ref_vector& forall_decls,
+			model_ref cex_m,
+			/*out*/expr_substitution& subst) {			
+			bv_util bu(m);
 			///////////////
 			for (unsigned i = 0; i < forall_decls.size(); ++i) {
 				app * const ac = forall_decls.get(i);
@@ -235,7 +252,7 @@ private:
 					func_decl * const b = ex_decls.get(j);
 					if (b->get_arity()) continue;
 					if (!bu.is_bv_sort(b->get_range())) continue;
-					if (cex_m.get_const_interp(a) !=
+					if (cex_m->get_const_interp(a) !=
 						cand_model->get_const_interp(b)) continue;
 					cout << "m:\n" << mk_ismt2_pp(a, m, 0) << "->" << mk_ismt2_pp(b, m, 0) << endl;
 					subst.erase(ac);
@@ -244,29 +261,52 @@ private:
 					break;
 				}
 			}
+		}
+
+		void refine(const CexWrap * cex) {
+			SASSERT(cex);
+			model_ref cex_m(alloc(model, m));
+			expr_substitution subst(m);
+			mk_model(NULL, cex->get_forall(), cex_m);
+			mk_subs(cex->get_forall(), cex_m, subst);
+			expr_ref rf(m.mk_not(cex->get_nmx()), m);
+			refine(rf, cex_m.get(), &subst);
+		}
+
+		void init_refine(const CexWrap * cex) {
+			SASSERT(cex);
+			model_ref cex_m(alloc(model, m));
+			mk_model(NULL, cex->get_forall(), cex_m);
+			expr_ref rf(m.mk_not(cex->get_nmx()), m);
+			refine(rf, cex_m.get(), NULL);
+		}
+
+		void refine(expr_ref rf, model * cex_m, expr_substitution * subst) {
 			//calculate refinement		
 			expr_ref ref(m);
 			expr_ref tmp(m);
-			ref = m.mk_not(cex->get_nmx());
+			ref = rf;
 			cout << "ref0: " << mk_ismt2_pp(ref, m, 2) << endl;
-			scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
-			er->set_substitution(&subst);
-			(*er)(ref.get(), tmp);
-			ref = tmp;
-			cout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;
-			if (1) {
-				model_evaluator me(cex_m);
+			if (subst) {
+				scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
+				er->set_substitution(subst);
+				(*er)(ref.get(), tmp);
+				ref = tmp;
+				cout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;
+			}
+			if (cex_m) {
+				model_evaluator me(*cex_m);
 				me(ref, tmp);
 				ref = tmp;
 				cout << "ref2: " << mk_ismt2_pp(ref, m, 2) << endl;
 			}
 			//simplify refinement
-			//simp(ref, tmp);
-			//ref = tmp;
-			//cout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;
-			///
+			simp(ref, tmp);
+			ref = tmp;
+			cout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;
 			sat->assert_expr(ref);
 		}
+
 	private:
 		ast_manager& m;
 		func_decl_ref_vector ex_decls;
@@ -289,8 +329,7 @@ private:
 			, free_decls(m)
 			, ex_decls(m)
 			, simp(m)			
-		    , cands(m, p, mode)
-		    //, cexs(m, p, mode)
+		    , cands(m, p, mode)		    
 
 		{}
 
@@ -302,7 +341,8 @@ private:
 		}
 
 		lbool operator() () {
-			init();
+			const bool ok = init();
+			if (!ok) return l_undef;
 			return cegar();
 		}
 	private:
@@ -318,7 +358,7 @@ private:
 		CandWrap cands;
 		ptr_vector<CexWrap>  cexs;
 
-		void init() {
+		bool init() {
 			//cout << "fla:\n" << mk_ismt2_pp(in_f, m, 0) << endl;
 
 			decl_collector dc(m);
@@ -350,7 +390,7 @@ private:
 					}
 					if (tmp_vs.empty()) break;
 					SASSERT(!level || is_forall); // TODO: exception?
-					if (level && !is_forall) return;
+					if(level && !is_forall) return false;
 					if (level || is_forall) ++level;
 					if (level) {
 						SASSERT(is_forall);
@@ -372,6 +412,7 @@ private:
 					nmx = tmp;
 				    cexs.back()->add_forall(forall_decls);
 					cexs.back()->set_nmx(nmx);
+					//cands.init_refine(cexs.back());
 				} else {
 					cands.assert(f);
 				}
@@ -385,6 +426,8 @@ private:
 			for (unsigned i = 0; i < free_decls.size(); ++i)
 				cout << "\n" << mk_ismt2_pp(free_decls[i].get(), m, 2);
 			cout << endl;
+
+			return true;
 		}
 
 		lbool cegar() {			
@@ -445,23 +488,48 @@ private:
 inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
 	params_ref p;
 	p.copy(_p);
-	if (!uf) return  mk_inc_sat_solver(m, p);
-	return mk_smt_solver(m,p, symbol("UFBV"));
-	//p.set_bool("auto_config", true);
-	//tactic_ref cext = mk_smt_tactic(p);
-	//cext->set_logic(symbol("UFBV"));
-	////mk_ufbv_tactic(m, p);
-	//solver* rv = mk_tactic2solver(m, cext.get(), p);
-	//SASSERT(rv);
-	//rv->set_produce_models(true);
-	//return rv;
+	if (!uf) return mk_inc_sat_solver(m, p);
+	//return mk_smt_solver(m,p, symbol("UFBV"));
+	//return mk_smt_solver(m, p, symbol());
+	tactic_ref t = mk_qfaufbv_tactic(m,p);// mk_smt_tactic(p);	
+	solver* rv = mk_tactic2solver(m, t.get(), p);
+	rv->set_produce_models(true);
+	SASSERT(rv);
+	return rv;
 }
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
-	return and_then(
-		//mk_simplify_tactic(m, p)
-		mk_macro_finder_tactic(m, p)
-		,mk_nnf_tactic(m, p)
-		,alloc(q2_tactic, m, p)
+	params_ref main_p;
+	main_p.set_bool("elim_and", true);
+	main_p.set_bool("sort_store", true);
+	main_p.set_bool("expand_select_store", true);
+	main_p.set_bool("expand_store_eq", true);
+	
+
+	params_ref simp2_p = p;
+	simp2_p.set_bool("som", true);
+	simp2_p.set_bool("pull_cheap_ite", true);
+	simp2_p.set_bool("push_ite_bv", false);
+	simp2_p.set_bool("local_ctx", true);
+	simp2_p.set_uint("local_ctx_limit", 10000000);
+
+	params_ref ctx_simp_p;
+	ctx_simp_p.set_uint("max_depth", 32);
+	ctx_simp_p.set_uint("max_steps", 5000000);
+
+
+	tactic * const preamble_t = and_then(mk_simplify_tactic(m),
+		mk_propagate_values_tactic(m),
+		using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
+		mk_solve_eqs_tactic(m),
+		mk_elim_uncnstr_tactic(m),
+		if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
+		using_params(mk_simplify_tactic(m), simp2_p),
+		mk_max_bv_sharing_tactic(m),
+		mk_macro_finder_tactic(m, p),
+		mk_nnf_tactic(m, p)
 		);
+
+
+	return and_then(preamble_t,alloc(q2_tactic, m, p));
 }
