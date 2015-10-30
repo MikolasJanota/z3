@@ -1,3 +1,21 @@
+/*++
+Copyright (c) 2015 Microsoft Corporation
+
+Module Name:
+
+q2_tactic.h
+
+Abstract:
+
+Tactic for 2 level quantification a la AReQS.
+
+Author:
+
+Mikolas Janota
+
+Revision History:
+--*/
+
 #ifndef _Q2_TACTIC_H_
 #define _Q2_TACTIC_H_
 #include"tactical.h"

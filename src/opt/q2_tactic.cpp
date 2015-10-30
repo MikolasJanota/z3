@@ -1,3 +1,20 @@
+/*++
+Copyright (c) 2015 Microsoft Corporation
+
+Module Name:
+
+q2_tactic.cpp
+
+Abstract:
+
+Tactic for 2 level quantification a la AReQS.
+
+Author:
+
+Mikolas Janota
+
+Revision History:
+--*/
 #include"q2_tactic.h"
 #include"qfbv_tactic.h"
 #include"expr_substitution.h"
@@ -32,520 +49,489 @@
 #include"max_bv_sharing_tactic.h"
 #include"bv_size_reduction_tactic.h"
 #include"ctx_simplify_tactic.h"
+#include"th_rewriter.h"
 
 using std::endl;
 
-/* used to solve by the unquantified part. */
-inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& p);
+/* solver used to solve by the unquantified part. */
+inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& p);//TODO: pass factory instead
 
 /* CEGAR-Based approach to two level quantification problems a la AReQS. */
 class q2_tactic : public tactic {
 public:
-	enum Mode { BV, UFBV }; // pure a bit-vectors or also uninterpreted functions in the matrix. 
+    enum Mode { BV, UFBV }; // pure a bit-vectors or also uninterpreted functions in the matrix. 
                                 //TODO set by params
 
-	q2_tactic(ast_manager& m, params_ref const& p)
-		: m_m(m)
-		, m_p(p) {}
+    q2_tactic(ast_manager& m, params_ref const& p)
+        : m_m(m)
+        , m_p(p) {}
 
-	virtual void operator()(goal_ref const & g,
-		goal_ref_buffer & result,
-		model_converter_ref & mc,
-		proof_converter_ref & pc,
-		expr_dependency_ref & core) {
-		ast_manager& m(g->m());
-		ptr_vector<expr> flas;
-		TRACE("q2",g->display(tout << "Goal:\n"););
-		g->get_formulas(flas);
-                // Running implementation 
-		imp i(m, m_p, q2_tactic::UFBV, flas);
-		const lbool o = i();
-                // Report result 
-		goal_ref resg(alloc(goal, *g, true));		
-		if (o == l_false) resg->assert_expr(m.mk_false());
-		if (o != l_undef) result.push_back(resg.get());
-                // TODO Report model 
-	}
+    virtual void operator()(goal_ref const & g,
+        goal_ref_buffer & result,
+        model_converter_ref & mc,
+        proof_converter_ref & pc,
+        expr_dependency_ref & core) {
+        ast_manager& m(g->m());
+        ptr_vector<expr> flas;
+        TRACE("q2", g->display(tout << "Goal:\n"););
+        g->get_formulas(flas);
+        // Running implementation 
+        imp i(m, m_p, q2_tactic::UFBV, flas);
+        const lbool o = i();
+        // Report result 
+        goal_ref resg(alloc(goal, *g, true));
+        if (o == l_false) resg->assert_expr(m.mk_false());
+        if (o != l_undef) result.push_back(resg.get());
+        // TODO Report model 
+    }
 
-	virtual void cleanup() { }
+    virtual void cleanup() { }
 
-	virtual tactic* translate(ast_manager& m) {
-		return alloc(q2_tactic, m, m_p);
-	}
+    virtual tactic* translate(ast_manager& m) {
+        return alloc(q2_tactic, m, m_p);
+    }
 private:
-	ast_manager& m_m;
-	params_ref m_p;
+    ast_manager& m_m;
+    params_ref m_p;
 
-	struct SimpWrap {// A wrapper for a formula simplifier. 
-		inline void operator() (expr * s, expr_ref & r) {
-			proof_ref dummy(m);
-			simp(s, r, dummy);
-		}
-		SimpWrap(ast_manager& m)
-			: m(m)
-			, simp(m)
-			, bsp(m)
-			, bvsp(m, bsp, bv_par) 
-		    , asp(m, bsp, simp, ar_par)
-		{
-			simp.register_plugin(&bsp);
-			simp.register_plugin(&bvsp);
-			simp.register_plugin(&asp);
-			simp.enable_ac_support(true);
-		}
-
-		~SimpWrap() {
-			simp.release_plugins();
-		}
-
-		ast_manager& m;
-		simplifier simp;
-		basic_simplifier_plugin bsp;
-		bv_simplifier_params bv_par;
-		bv_simplifier_plugin bvsp;
-		array_simplifier_params ar_par;
-		array_simplifier_plugin asp;
-	};
-
-        // A wrapper for the solver used to obtain counterexamples,
-        // i.e. moves for the universal player, given a move for existential.
-	class CexWrap {
-	public:
-		CexWrap(ast_manager&m, params_ref p, Mode mode)
-			: m(m)
+    // A wrapper for the solver used to obtain counterexamples,
+    // i.e. moves for the universal player, given a move for existential.
+    class CexWrap {
+    public:
+        CexWrap(ast_manager&m, params_ref p, Mode mode)
+            : m(m)
             , mode(mode)
-			, p(p)
-			, nmx(NULL,m)
-			, cex_sat(mode==BV ? mk_sat_solver(false, m, p) : NULL)
-			, dummy(m)
-			, forall_decls(m)
-		{ }
+            , p(p)
+            , nmx(NULL, m)
+            , cex_sat(mode == BV ? mk_sat_solver(false, m, p) : NULL)
+            , dummy(m)
+            , forall_decls(m)
+        { }
 
-                
+
         // register forall variables
-		void add_forall(const app_ref_vector& fas) {
-			forall_decls.append(fas);
-		}
+        void add_forall(const app_ref_vector& fas) {
+            forall_decls.append(fas);
+        }
 
         // set the value of the negated matrix
-		void set_nmx(expr_ref e) {
-			SASSERT(!nmx.get());
-			nmx = e;
-			if (mode == BV) cex_sat->assert_expr(nmx);
-		}
+        void set_nmx(expr_ref e) {
+            SASSERT(!nmx.get());
+            nmx = e;
+            if (mode == BV) cex_sat->assert_expr(nmx);
+        }
 
-		// calculate a counter example for a given existential assignment
-		// return l_true if such found; return l_false if such does not exist
-		lbool operator() (model_ref cand) {
-			SASSERT(nmx.get());
-			return run_nit(cand);
-		}
+        // calculate a counter example for a given existential assignment
+        // return l_true if such found; return l_false if such does not exist
+        lbool operator() (model_ref cand) {
+            SASSERT(nmx.get());
+            return run_nit(cand);
+        }
 
-		const model_ref get_model() const { return model; }
+        const model_ref get_model() const { return model; }
 
-		const app_ref_vector& get_forall() const { return forall_decls; }
+        const app_ref_vector& get_forall() const { return forall_decls; }
 
-		expr_ref get_nmx() const { return nmx; }
-	private:
-		lbool run_nit(model_ref cand) {// non incremental implementation
-						// substitute the candidate into the negated matrix
-			expr_ref ns(m);
-			model_evaluator me(*cand);
-			me(nmx, ns);
-			TRACE("q2",
-				model_smt2_pp(tout << "cand_m(\n", m, *cand, 2); tout << ")\n";
-			    tout << "nit nmx(\n" << mk_ismt2_pp(nmx, m, 2) << ")\n";
-     			tout << "nit ns(\n" << mk_ismt2_pp(ns, m, 2) << ")\n"; );
-			// run SAT
-			scoped_ptr<solver> cex_sat_tmp = mk_sat_solver(true, m, p);
-			cex_sat_tmp->assert_expr(ns);
-			const lbool res = cex_sat_tmp->check_sat(0, NULL);
-			if (res == l_true) cex_sat_tmp->get_model(model);
-			return res;
-		}
+        expr_ref get_nmx() const { return nmx; }
+    private:
+        lbool run_nit(model_ref cand) {// non incremental implementation
+                        // substitute the candidate into the negated matrix
+            expr_ref ns(m);
+            model_evaluator me(*cand);
+            me(nmx, ns);
+            TRACE("q2",
+                model_smt2_pp(tout << "cand_m(\n", m, *cand, 2); tout << ")\n";
+            tout << "nit nmx(\n" << mk_ismt2_pp(nmx, m, 2) << ")\n";
+            tout << "nit ns(\n" << mk_ismt2_pp(ns, m, 2) << ")\n"; );
+            // run SAT
+            scoped_ptr<solver> cex_sat_tmp = mk_sat_solver(true, m, p);
+            cex_sat_tmp->assert_expr(ns);
+            const lbool res = cex_sat_tmp->check_sat(0, NULL);
+            if (res == l_true) cex_sat_tmp->get_model(model);
+            return res;
+        }
 
-		lbool run_it(model_ref cand) {// incremental implementation
+        lbool run_it(model_ref cand) {// incremental implementation
                         //TODO: works?
-			assum.reset();
-			model.reset();
-			dummy.reset();
-			model_to_assum(cand, assum, dummy);
-			const lbool res = cex_sat->check_sat(assum.size(), assum.c_ptr());
-			assum.reset();
-			dummy.reset();
-			if (res == l_true) cex_sat->get_model(model);
-			return res;
-		}
-	private:
-		ast_manager& m;
-		Mode mode;
-		params_ref p;
-		expr_ref nmx;
-		scoped_ptr<solver> cex_sat;
-		model_ref model;
-		expr_ref_vector dummy;
-		ptr_vector<expr> assum;
-		app_ref_vector forall_decls;
+            assum.reset();
+            model.reset();
+            dummy.reset();
+            model_to_assum(cand, assum, dummy);
+            const lbool res = cex_sat->check_sat(assum.size(), assum.c_ptr());
+            assum.reset();
+            dummy.reset();
+            if (res == l_true) cex_sat->get_model(model);
+            return res;
+        }
+    private:
+        ast_manager& m;
+        Mode mode;
+        params_ref p;
+        expr_ref nmx;
+        scoped_ptr<solver> cex_sat;
+        model_ref model;
+        expr_ref_vector dummy;
+        ptr_vector<expr> assum;
+        app_ref_vector forall_decls;
 
-		void model_to_assum(const model_ref sat_m, ptr_vector<expr>& assum,
-			expr_ref_vector& cand) {
-			SASSERT(!sat_m->get_num_functions());
-			const unsigned sz = sat_m->get_num_constants();
-			for (unsigned i = 0; i < sz; ++i) {
-				func_decl * const cd = sat_m->get_constant(i);
-				SASSERT(cd->get_arity() == 0);
-				expr* ci = sat_m->get_const_interp(cd);
-				if (!ci) ci = m.get_some_value(cd->get_range());
-				const expr_ref a(m.mk_eq(m.mk_const(cd), ci), m);
-				cand.push_back(a);
-				assum.push_back(a.get());
-			}
-		}
-	};
-
-
-        // A wrapper for the solver used to obtain candidates,
-        // i.e. moves for the existential player.
-	class CandWrap {
-	public:
-		CandWrap(ast_manager& m, params_ref p, Mode& mode)
-			: m(m)
-			, ex_decls(m)
-			, sat(mk_sat_solver(mode == UFBV, m, p))
-			, simp(m)
-		{  }
+        void model_to_assum(const model_ref sat_m, ptr_vector<expr>& assum,
+            expr_ref_vector& cand) {
+            SASSERT(!sat_m->get_num_functions());
+            const unsigned sz = sat_m->get_num_constants();
+            for (unsigned i = 0; i < sz; ++i) {
+                func_decl * const cd = sat_m->get_constant(i);
+                SASSERT(cd->get_arity() == 0);
+                expr* ci = sat_m->get_const_interp(cd);
+                if (!ci) ci = m.get_some_value(cd->get_range());
+                const expr_ref a(m.mk_eq(m.mk_const(cd), ci), m);
+                cand.push_back(a);
+                assum.push_back(a.get());
+            }
+        }
+    };
 
 
-		// register an existential variable.
-		inline void add_ex(func_decl * ex) {
-			ex_decls.push_back(ex);
-		}
+    // A wrapper for the solver used to obtain candidates,
+    // i.e. moves for the existential player.
+    class CandWrap {
+    public:
+        CandWrap(ast_manager& m, params_ref p, Mode& mode)
+            : m(m)
+            , ex_decls(m)
+            , sat(mk_sat_solver(mode == UFBV, m, p))
+            , simp(m)
+        {  }
 
-		// assert an expression that must be always true (used for expressions with no universal variables) 
-		void assert(expr *  e) {
-			sat->assert_expr(e);
-		}
 
-		// refine based on a counter example 
-		void refine(const CexWrap * cex) {
-			SASSERT(cex);
-			model_ref cex_m(alloc(model, m));
-			expr_substitution subst(m);
-			mk_model(cex->get_model().get(), cex->get_forall(), cex_m);
-			mk_subs(cex->get_forall(), cex_m, subst);
-			expr_ref rf(m.mk_not(cex->get_nmx()), m);
-			refine(rf, cex_m.get(), &subst);
-		}
+        // register an existential variable.
+        inline void add_ex(func_decl * ex) {
+            ex_decls.push_back(ex);
+        }
 
-		// initial random refinement, i.e. cex has no model
-		void init_refine(const CexWrap * cex) {
-			SASSERT(cex);
-			model_ref cex_m(alloc(model, m));
-			mk_model(NULL, cex->get_forall(), cex_m);
-			expr_ref rf(m.mk_not(cex->get_nmx()), m);
-			refine(rf, cex_m.get(), NULL);
-		}
+        // assert an expression that must be always true (used for expressions with no universal variables) 
+        void assert(expr *  e) {
+            sat->assert_expr(e);
+        }
 
-		//TODO: Make sure that only registered variables are in the model.
-		const model_ref get_model() const { return cand_model; }
+        // refine based on a counter example 
+        void refine(const CexWrap * cex) {
+            SASSERT(cex);
+            model_ref cex_m(alloc(model, m));
+            expr_substitution subst(m);
+            mk_model(cex->get_model().get(), cex->get_forall(), cex_m);
+            mk_subs(cex->get_forall(), cex_m, subst);
+            expr_ref rf(m.mk_not(cex->get_nmx()), m);
+            refine(rf, cex_m.get(), &subst);
+        }
 
-		inline lbool operator() () {
-			const lbool retv = sat->check_sat(0, NULL);
-			if (retv == l_true) sat->get_model(cand_model);
-			return retv;
-		}
+        // initial random refinement, i.e. cex has no model
+        void init_refine(const CexWrap * cex) {
+            SASSERT(cex);
+            model_ref cex_m(alloc(model, m));
+            mk_model(NULL, cex->get_forall(), cex_m);
+            expr_ref rf(m.mk_not(cex->get_nmx()), m);
+            refine(rf, cex_m.get(), NULL);
+        }
 
-	private:
+        //TODO: Make sure that only registered variables are in the model.
+        const model_ref get_model() const { return cand_model; }
 
-		//Make sure that we have a model that assigns to those and only those 
-		//variables that are universally qualified. 
-		// If model is NULL, values are guessed. 
-		void mk_model(const model *  _cex_m,
-			const app_ref_vector& forall_decls,
-			/*out*/model_ref cex_m) {
-			SASSERT(cex_m.get());
-			for (unsigned i = 0; i < forall_decls.size(); ++i) {
-				func_decl * const cd = forall_decls[i]->get_decl();
-				if (cd->get_arity()) {
-					SASSERT(0);
-					// TODO
-				}
-				else {
-					expr* ci = _cex_m ? _cex_m->get_const_interp(cd) : NULL;
-					if (!ci) ci = m.get_some_value(cd->get_range());
-					cex_m->register_decl(cd, ci);
-				}
-			}
-			TRACE("q2", model_smt2_pp(tout << "cex_m\n", m, *(cex_m.get()), 2););
-		}
+        inline lbool operator() () {
+            //sat->display(std::cout);
+            const lbool retv = sat->check_sat(0, NULL);
+            if (retv == l_true) sat->get_model(cand_model);
+            return retv;
+        }
 
-		// Try to come up with clever substitutions based on a counter examples and a candidate. 
-		// Currently just a hack that looks for identical bv values and maps the corresponding variables. 
-		void mk_subs(
-			const app_ref_vector& forall_decls,
-			model_ref cex_m,
-			/*out*/expr_substitution& subst) {			
-			bv_util bu(m);
-			for (unsigned i = 0; i < forall_decls.size(); ++i) {
-				app * const ac = forall_decls.get(i);
-				func_decl * const a = ac->get_decl();
-				if (a->get_arity()) continue;
-				if (!bu.is_bv_sort(a->get_range())) continue;
-				for (unsigned j = 0; j < ex_decls.size(); ++j) {
-					func_decl * const b = ex_decls.get(j);
-					if (b->get_arity()) continue;
-					if (!bu.is_bv_sort(b->get_range())) continue;
-					if (cex_m->get_const_interp(a) !=
-						cand_model->get_const_interp(b)) continue;
-                                        TRACE("q2",tout << "m:\n" << mk_ismt2_pp(a, m, 0) << "->" << mk_ismt2_pp(b, m, 0) << endl;);
-					subst.erase(ac);
-					app * const bc = m.mk_const(b);
-					subst.insert(ac, bc);
-					break;
-				}
-			}
-		}
+    private:
+
+        //Make sure that we have a model that assigns to those and only those 
+        //variables that are universally qualified. 
+        // If model is NULL, values are guessed. 
+        void mk_model(const model *  _cex_m,
+            const app_ref_vector& forall_decls,
+            /*out*/model_ref cex_m) {
+            SASSERT(cex_m.get());
+            for (unsigned i = 0; i < forall_decls.size(); ++i) {
+                func_decl * const cd = forall_decls[i]->get_decl();
+                if (cd->get_arity()) {
+                    SASSERT(0);
+                    // TODO
+                }
+                else {
+                    expr* ci = _cex_m ? _cex_m->get_const_interp(cd) : NULL;
+                    if (!ci) ci = m.get_some_value(cd->get_range());
+                    cex_m->register_decl(cd, ci);
+                }
+            }
+            TRACE("q2", model_smt2_pp(tout << "cex_m\n", m, *(cex_m.get()), 2););
+        }
+
+        // Try to come up with clever substitutions based on a counter examples and a candidate. 
+        // Currently just a hack that looks for identical bv values and maps the corresponding variables. 
+        void mk_subs(
+            const app_ref_vector& forall_decls,
+            model_ref cex_m,
+            /*out*/expr_substitution& subst) {
+            bv_util bu(m);
+            for (unsigned i = 0; i < forall_decls.size(); ++i) {
+                app * const ac = forall_decls.get(i);
+                func_decl * const a = ac->get_decl();
+                if (a->get_arity()) continue;
+                if (!bu.is_bv_sort(a->get_range())) continue;
+                for (unsigned j = 0; j < ex_decls.size(); ++j) {
+                    func_decl * const b = ex_decls.get(j);
+                    if (b->get_arity()) continue;
+                    if (!bu.is_bv_sort(b->get_range())) continue;
+                    if (cex_m->get_const_interp(a) !=
+                        cand_model->get_const_interp(b)) continue;
+                    TRACE("q2", tout << "m:\n" << mk_ismt2_pp(a, m, 0) << "->" << mk_ismt2_pp(b, m, 0) << endl;);
+                    subst.erase(ac);
+                    app * const bc = m.mk_const(b);
+                    subst.insert(ac, bc);
+                    break;
+                }
+            }
+        }
 
 
         // Refine based on a model and a substitution. The substitution is applied first. 
-		void refine(expr_ref rf, model * cex_m, expr_substitution * subst) {
-			//calculate refinement
-			expr_ref ref(m);
-			expr_ref tmp(m);
-			ref = rf;
-			TRACE("q2",tout << "ref0: " << mk_ismt2_pp(ref, m, 2) << endl;);
-			if (subst) {// apply substitution 
-				scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
-				er->set_substitution(subst);
-				(*er)(ref.get(), tmp);
-				ref = tmp;
-				TRACE("q2",tout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;);
-			}
-			if (cex_m) { // apply counter example 
-				model_evaluator me(*cex_m);
-				me(ref, tmp);
-				ref = tmp;
-				TRACE("q2",tout << "ref2: " << mk_ismt2_pp(ref, m, 2) << endl;);
-			}
-			//simplify refinement
-			//simp(ref, tmp);
-			//ref = tmp;
-			//TRACE("q2",tout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;);
+        void refine(expr_ref rf, model * cex_m, expr_substitution * subst) {
+            //calculate refinement
+            expr_ref ref(m);
+            expr_ref tmp(m);
+            ref = rf;
+            TRACE("q2", tout << "ref0: " << mk_ismt2_pp(ref, m, 2) << endl;);
+            if (subst) {// apply substitution 
+                scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
+                er->set_substitution(subst);
+                (*er)(ref.get(), tmp);
+                ref = tmp;
+                TRACE("q2", tout << "ref1: " << mk_ismt2_pp(ref, m, 2) << endl;);
+            }
+            if (cex_m) { // apply counter example 
+                model_evaluator me(*cex_m);
+                me(ref, tmp);
+                ref = tmp;
+                TRACE("q2", tout << "ref2: " << mk_ismt2_pp(ref, m, 2) << endl;);
+            }
+            //simplify refinement
+            simp(ref);
+            //TRACE("q2",tout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;);
             // plug into solver 
-			sat->assert_expr(ref);
-		}
-	private:
-		ast_manager& m;
-		func_decl_ref_vector ex_decls;
-		scoped_ptr<solver> sat;
-		model_ref cand_model;
-		SimpWrap simp;
-	};
+            sat->assert_expr(ref);
+        }
+    private:
+        ast_manager& m;
+        func_decl_ref_vector ex_decls;
+        scoped_ptr<solver> sat;
+        model_ref cand_model;
+        th_rewriter simp;
+    };
 
 
 
-        // Implementation of the CEGAR loop.
-	class imp {
-	public:
-		imp(ast_manager& m, params_ref p, Mode mode,
-			const ptr_vector<expr>& fmls)
-			: m(m)
-			, p(p)
-			, mode(mode)
-			, fmls(fmls)
-			, free_decls(m)
-			, ex_decls(m)
-			, simp(m)			
-		    , cands(m, p, mode)		    
+    // Implementation of the CEGAR loop.
+    class imp {
+    public:
+        imp(ast_manager& m, params_ref p, Mode mode,
+            const ptr_vector<expr>& fmls)
+            : m(m)
+            , p(p)
+            , mode(mode)
+            , fmls(fmls)
+            , free_decls(m)
+            , ex_decls(m)
+            , simp(m)
+            , cands(m, p, mode)
 
-		{}
+        {}
 
-		~imp() {
-			while (cexs.size()) {
-				dealloc(cexs.back());
-				cexs.pop_back();
-			}
-		}
+        ~imp() {
+            while (cexs.size()) {
+                dealloc(cexs.back());
+                cexs.pop_back();
+            }
+        }
 
-		lbool operator() () {
-			const bool ok = init();
-			if (!ok) return l_undef;
-			return cegar();
-		}
-	private:
-		ast_manager& m;
-		params_ref p;
-		Mode mode;
-		const ptr_vector<expr>& fmls;
+        lbool operator() () {
+            const bool ok = init();
+            if (!ok) return l_undef;
+            return cegar();
+        }
+    private:
+        ast_manager& m;
+        params_ref p;
+        Mode mode;
+        const ptr_vector<expr>& fmls;
 
-		func_decl_ref_vector free_decls;
-		app_ref_vector ex_decls;
-		SimpWrap simp;
+        func_decl_ref_vector free_decls;
+        app_ref_vector ex_decls;
+        th_rewriter simp;
 
-		CandWrap cands;
-		ptr_vector<CexWrap>  cexs; // Maintain a counter-example generator for each formula (A X. F)
+        CandWrap cands;
+        ptr_vector<CexWrap>  cexs; // Maintain a counter-example generator for each formula (A X. F)
 
-		bool init() {
-			decl_collector dc(m);
-			quantifier_hoister hoister(m);
-			expr_ref tmp(m);
-			app_ref_vector tmp_vs(m);
-			for (unsigned i = 0; i < fmls.size(); ++i) {				
-				expr * f = fmls[i];
-				TRACE("q2",tout << "fi:\n" << mk_ismt2_pp(f, m, 2) << endl;);
-				dc.visit(f);
-                                // pull initial existential for, which are essentially the same as free 
-				hoister.pull_exists(f, tmp_vs, tmp);
-				if (tmp_vs.size()) {
-					f = tmp;
-					for (unsigned i = 0; i < tmp_vs.size(); ++i) {
-						app * const v = tmp_vs.get(i);
-						cands.add_ex(v->get_decl());
-						TRACE("q2",tout << "E " << mk_ismt2_pp(v, m, 2) << endl;);
-					}
-					ex_decls.append(tmp_vs);
-				} 
-				unsigned level = 0;
-                                // pull universals and make sure there are no further existentials
-				app_ref_vector forall_decls(m);
-				while (1) {
-					bool is_forall;
-					tmp_vs.reset();
-					hoister(f, tmp_vs, is_forall, tmp);
-					for (unsigned i = 0; i < tmp_vs.size(); ++i) {
-						TRACE("q2",tout << (is_forall?'A':'E') << " " << mk_ismt2_pp(tmp_vs[i].get(), m, 2) << endl;);
-					}
-					if (tmp_vs.empty()) break;
-					SASSERT(!level || is_forall); // TODO: exception?
-					if(level && !is_forall) return false;
-					if (level || is_forall) ++level;
-					if (level) {
-						SASSERT(is_forall);
-						forall_decls.append(tmp_vs);
-					} else {
-                                          UNREACHABLE(); //TODO OK?
-					}
-					f = tmp;
-					TRACE("q2",tout << "f:\n" << mk_ismt2_pp(f, m, 2) << endl;);
-				}
-				TRACE("q2",tout << (level ? "quant" : "no quant") << endl;);
-				if (level) {// handle quantified formula 
-					CexWrap* const cex = alloc(CexWrap, m, p, mode);
-					expr_ref nmx(m);
-					tmp = m.mk_not(f);
-					nmx = tmp;
-					//simp(nmx, tmp);
-					nmx = tmp;
+        bool init() {
+            decl_collector dc(m);
+            quantifier_hoister hoister(m);
+            expr_ref tmp(m);
+            app_ref_vector tmp_vs(m);
+            for (unsigned i = 0; i < fmls.size(); ++i) {
+                expr * f = fmls[i];
+                TRACE("q2", tout << "fi:\n" << mk_ismt2_pp(f, m, 2) << endl;);
+                dc.visit(f);
+                // pull initial existential for, which are essentially the same as free 
+                hoister.pull_exists(f, tmp_vs, tmp);
+                if (tmp_vs.size()) {
+                    f = tmp;
+                    for (unsigned i = 0; i < tmp_vs.size(); ++i) {
+                        app * const v = tmp_vs.get(i);
+                        cands.add_ex(v->get_decl());
+                        TRACE("q2", tout << "E " << mk_ismt2_pp(v, m, 2) << endl;);
+                    }
+                    ex_decls.append(tmp_vs);
+                }
+                unsigned level = 0;
+                // pull universals and make sure there are no further existentials
+                app_ref_vector forall_decls(m);
+                while (1) {
+                    bool is_forall;
+                    tmp_vs.reset();
+                    hoister(f, tmp_vs, is_forall, tmp);
+                    for (unsigned i = 0; i < tmp_vs.size(); ++i) {
+                        TRACE("q2", tout << (is_forall ? 'A' : 'E') << " " << mk_ismt2_pp(tmp_vs[i].get(), m, 2) << endl;);
+                    }
+                    if (tmp_vs.empty()) break;
+                    SASSERT(!level || is_forall); // TODO: exception?
+                    if (level && !is_forall) return false;
+                    if (level || is_forall) ++level;
+                    if (level) {
+                        SASSERT(is_forall);
+                        forall_decls.append(tmp_vs);
+                    }
+                    else {
+                        UNREACHABLE(); //TODO OK?
+                    }
+                    f = tmp;
+                    TRACE("q2", tout << "f:\n" << mk_ismt2_pp(f, m, 2) << endl;);
+                }
+                TRACE("q2", tout << (level ? "quant" : "no quant") << endl;);
+                if (level) {// handle quantified formula 
+                    CexWrap* const cex = alloc(CexWrap, m, p, mode);
+                    expr_ref nmx(m);
+                    simp(m.mk_not(f), nmx);
                     cex->add_forall(forall_decls);
-					cex->set_nmx(nmx);
-					//cands.init_refine(cexs.back());
-					cexs.push_back(cex);
-				} else {// assert an unquantified formula 
-					cands.assert(f);
-				}
+                    cex->set_nmx(nmx);
+                    //cands.init_refine(cexs.back());
+                    cexs.push_back(cex);
+                }
+                else {// assert an unquantified formula 
+                    cands.assert(f);
+                }
 
-			}
+            }
 
-			process_free_decls(m, dc.get_func_decls(), dc.get_num_decls());
-			process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
+            process_free_decls(m, dc.get_func_decls(), dc.get_num_decls());
+            process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
 
-			TRACE("q2",
-                          tout << "F\n";
-			  for (unsigned i = 0; i < free_decls.size(); ++i)
-                            tout << mk_ismt2_pp(free_decls[i].get(), m, 2) << endl;
-                        ); 
-          	          
+            TRACE("q2",
+                tout << "F\n";
+            for (unsigned i = 0; i < free_decls.size(); ++i)
+                tout << mk_ismt2_pp(free_decls[i].get(), m, 2) << endl;
+            );
 
-			return true;
-		}
 
-		lbool cegar() {			
-			int count = 0;
-			while (1) {
-				std::cout << "it: " << ++count << endl;
-				////////////
-				const lbool sat_res = cands(); // get cand
-				TRACE("q2",tout << "cand_res: " << sat_res << endl;);
-				if (sat_res == l_false) { return l_false; }
-				if (sat_res == l_undef) { return l_undef; }
-                                // check if there is a counter example 
-				bool all_good = true;
-				for (unsigned i = 0; i < cexs.size(); ++i) {
-					CexWrap * const s = cexs[i];
-					const lbool cex_res = (*s)(cands.get_model());
-                                        TRACE("q2",tout << "cex_res[" << i << "]: " << cex_res << endl;);
-					if (cex_res == l_undef) { return l_undef;  }
-					if (cex_res == l_false) { continue; }
-					all_good = false;
-					cands.refine(s);
-				}
-				if (all_good) return l_true;
-			}
-			UNREACHABLE();
-			return l_undef;
-		}
+            return true;
+        }
 
-		void process_free_decls(ast_manager& m,
-			func_decl * const * dcs,
-			unsigned count) {
-			for (unsigned i = 0; i < count; ++i) {
-				//const 
-				func_decl * const fd = dcs[i];
-				free_decls.push_back(fd);
-				cands.add_ex(fd);
-				SASSERT(mode==UFBV || fd->get_arity() == 0);
-			}
-		}
-	};
+        lbool cegar() {
+            int count = 0;
+            while (1) {
+                std::cout << "it: " << ++count << endl;
+                ////////////
+                const lbool sat_res = cands(); // get cand
+                TRACE("q2", tout << "cand_res: " << sat_res << endl;);
+                if (sat_res == l_false) { return l_false; }
+                if (sat_res == l_undef) { return l_undef; }
+                // check if there is a counter example 
+                bool all_good = true;
+                for (unsigned i = 0; i < cexs.size(); ++i) {
+                    CexWrap * const s = cexs[i];
+                    const lbool cex_res = (*s)(cands.get_model());
+                    TRACE("q2", tout << "cex_res[" << i << "]: " << cex_res << endl;);
+                    if (cex_res == l_undef) { return l_undef; }
+                    if (cex_res == l_false) { continue; }
+                    all_good = false;
+                    cands.refine(s);
+                }
+                if (all_good) return l_true;
+            }
+            UNREACHABLE();
+            return l_undef;
+        }
+
+        void process_free_decls(ast_manager& m,
+            func_decl * const * dcs,
+            unsigned count) {
+            for (unsigned i = 0; i < count; ++i) {
+                //const 
+                func_decl * const fd = dcs[i];
+                free_decls.push_back(fd);
+                cands.add_ex(fd);
+                SASSERT(mode == UFBV || fd->get_arity() == 0);
+            }
+        }
+    };
 };
 
 inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
-	params_ref p;
-	p.copy(_p);
-	if (!uf) return mk_inc_sat_solver(m, p);
-	//return mk_smt_solver(m,p, symbol("UFBV"));
-	//return mk_smt_solver(m, p, symbol());
-	tactic_ref t = mk_qfaufbv_tactic(m,p);
-	//tactic_ref t = mk_smt_tactic(p);	
-	solver* rv = mk_tactic2solver(m, t.get(), p);
-	rv->set_produce_models(true);
-	SASSERT(rv);
-	return rv;
+    params_ref p;
+    p.copy(_p);
+    if (!uf) return mk_inc_sat_solver(m, p);
+    //return mk_smt_solver(m,p, symbol("UFBV"));
+    //return mk_smt_solver(m, p, symbol());
+    tactic_ref t = mk_qfaufbv_tactic(m, p);
+    //tactic_ref t = mk_smt_tactic(p);	
+    solver* rv = mk_tactic2solver(m, t.get(), p);
+    rv->set_produce_models(true);
+    SASSERT(rv);
+    return rv;
 }
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
-	params_ref main_p;
-	main_p.set_bool("elim_and", true);
-	main_p.set_bool("sort_store", true);
-	main_p.set_bool("expand_select_store", true);
-	main_p.set_bool("expand_store_eq", true);
+    params_ref main_p;
+    main_p.set_bool("elim_and", true);
+    main_p.set_bool("sort_store", true);
+    main_p.set_bool("expand_select_store", true);
+    main_p.set_bool("expand_store_eq", true);
 
-	params_ref simp2_p = p;
-	simp2_p.set_bool("som", true);
-	simp2_p.set_bool("pull_cheap_ite", true);
-	simp2_p.set_bool("push_ite_bv", false);
-	simp2_p.set_bool("local_ctx", true);
-	simp2_p.set_uint("local_ctx_limit", 10000000);
+    params_ref simp2_p = p;
+    simp2_p.set_bool("som", true);
+    simp2_p.set_bool("pull_cheap_ite", true);
+    simp2_p.set_bool("push_ite_bv", false);
+    simp2_p.set_bool("local_ctx", true);
+    simp2_p.set_uint("local_ctx_limit", 10000000);
 
-	params_ref ctx_simp_p;
-	ctx_simp_p.set_uint("max_depth", 32);
-	ctx_simp_p.set_uint("max_steps", 5000000);
+    params_ref ctx_simp_p;
+    ctx_simp_p.set_uint("max_depth", 32);
+    ctx_simp_p.set_uint("max_steps", 5000000);
 
-	tactic * const preamble_t = and_then(
-		mk_simplify_tactic(m),
-		mk_propagate_values_tactic(m),
-		//using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
-		mk_solve_eqs_tactic(m),
-		mk_elim_uncnstr_tactic(m),
-		if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
-		using_params(mk_simplify_tactic(m), simp2_p),
-		mk_max_bv_sharing_tactic(m),
-		mk_macro_finder_tactic(m, p),
-		mk_nnf_tactic(m, p)
-		);
+    tactic * const preamble_t = and_then(
+        mk_simplify_tactic(m),
+        mk_propagate_values_tactic(m),
+        //using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
+        mk_solve_eqs_tactic(m),
+        mk_elim_uncnstr_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
+        using_params(mk_simplify_tactic(m), simp2_p),
+        mk_max_bv_sharing_tactic(m),
+        mk_macro_finder_tactic(m, p),
+        mk_nnf_tactic(m, p)
+        );
 
 
-	return and_then(
-		preamble_t,
-		alloc(q2_tactic, m, p));
+    return and_then(
+        preamble_t,
+        alloc(q2_tactic, m, p));
 }
