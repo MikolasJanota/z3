@@ -85,6 +85,7 @@ public:
                     stack.pop_back();
                     buffer<symbol>  names;
                     if (m.is_label_lit(a,names)) {
+                        SASSERT(names.size()==1);
                         e2e.insert(curr, m.mk_true());
                     }
                     else if (m.is_label(a)) {
@@ -106,10 +107,9 @@ public:
             }
                 break;
             case AST_QUANTIFIER: {
-                UNREACHABLE();
                 quantifier * const q = to_quantifier(curr);
-                if (visited.is_marked(q->get_expr())) {
-                    //e2e.insert(q, m.mk_quantifier());
+                if (visited.is_marked(q->get_expr())) {                     
+                    e2e.insert(q, m.update_quantifier(q, e2e[q->get_expr()]));
                     visited.mark(curr, true);
                     stack.pop_back();
                 }
@@ -153,10 +153,30 @@ public:
         ast_manager& m(g->m());
         ptr_vector<expr> flas;
         TRACE("q2", g->display(tout << "Goal:\n"););
-        g->get_formulas(flas);
+        expr_ref_vector flas_refs(m);
+        if (0) {
+            g->get_formulas(flas);
+        }
+        else {
+            for (unsigned i = 0; i < g->size(); i++) {
+                expr_ref sc(m);
+                label_removal lr(m);
+                lr(g->form(i), sc);
+                flas_refs.push_back(sc);
+                flas.push_back(sc.get());
+                if (sc.get() != g->form(i)) {
+                    TRACE("q2",
+                        tout << "orig:(\n" << mk_ismt2_pp(g->form(i), m, 2) << ")\n";
+                    tout << "no lb:(\n" << mk_ismt2_pp(sc.get(), m, 2) << ")\n";
+                    );
+                }
+            }
+        }
         // Running implementation 
         imp i(m, m_p, q2_tactic::UFBV, flas);
         const lbool o = i();
+        flas.reset();
+        flas_refs.reset();
         // Report result 
         goal_ref resg(alloc(goal, *g, true));
         if (o == l_false) resg->assert_expr(m.mk_false());
@@ -281,7 +301,10 @@ private:
             , simp(m)
         {  }
 
-
+        ~CandWrap() {
+            if(sat) dealloc(sat);
+            sat = 0;
+        }
         // register an existential variable.
         inline void add_ex(func_decl * ex) {
             ex_decls.push_back(ex);
@@ -289,15 +312,7 @@ private:
 
         // assert an expression that must be always true (used for expressions with no universal variables) 
         void assert(expr *  e) {
-            if (1) {
-                expr_ref sc(m);
-                label_removal lr(m);
-                lr(e, sc);
-                sat->assert_expr(sc);
-            }
-            else {
-                sat->assert_expr(e);
-            }
+            sat->assert_expr(e);
         }
 
         // refine based on a counter example 
@@ -324,7 +339,7 @@ private:
         const model_ref get_model() const { return cand_model; }
 
         inline lbool operator() () {
-            sat->display(std::cout);
+            //sat->display(std::cout); return l_undef;
             const lbool retv = sat->check_sat(0, NULL);
             if (retv == l_true) sat->get_model(cand_model);
             return retv;
@@ -406,20 +421,12 @@ private:
             simp(ref);
             //TRACE("q2",tout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;);
             // plug into solver 
-            if (1) {
-                expr_ref sc(m);
-                label_removal lr(m);
-                lr(ref.get(), sc);
-                sat->assert_expr(sc);
-            }
-            else {
-                sat->assert_expr(ref);
-            }
+            sat->assert_expr(ref);
         }
     private:
         ast_manager& m;
         func_decl_ref_vector ex_decls;
-        scoped_ptr<solver> sat;
+        solver * sat;
         model_ref cand_model;
         th_rewriter simp;
     };
