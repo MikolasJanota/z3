@@ -53,6 +53,85 @@ Revision History:
 
 using std::endl;
 
+class label_removal {
+public:
+    label_removal(ast_manager& m)
+        : m(m) {}
+
+    void operator () (expr * in, expr_ref& out) {
+        ptr_vector<expr> stack;
+        expr *           curr;
+        expr_mark        visited;
+        obj_map<expr, expr*> e2e;
+        stack.push_back(in);
+        while (!stack.empty()) {
+            curr = stack.back();
+            if (visited.is_marked(curr)) {
+                stack.pop_back();
+                continue;
+            }
+
+            switch (curr->get_kind()) {
+            case AST_VAR:
+                visited.mark(curr, true);
+                stack.pop_back();
+                e2e.insert(curr, curr);
+                break;
+
+            case AST_APP: {
+                app *  a = to_app(curr);
+                if (for_each_expr_args(stack, visited, a->get_num_args(), a->get_args())) {
+                    visited.mark(curr, true);
+                    stack.pop_back();
+                    buffer<symbol>  names;
+                    if (m.is_label_lit(a,names)) {
+                        e2e.insert(curr, m.mk_true());
+                    }
+                    else if (m.is_label(a)) {
+                        e2e.insert(a, e2e[a->get_arg(0)]);
+                    }
+                    else {
+                        ptr_vector<expr> ags;
+                        bool c = false;
+                        for (unsigned i = 0; i < a->get_num_args(); ++i) {
+                            const expr *  const old = a->get_arg(i);
+                            expr *  const n = e2e[a->get_arg(i)];
+                            if (old != n) c = true;
+                            if (n) ags.push_back(n);
+                        }
+                        if (c) e2e.insert(curr, m.mk_app(a->get_decl(), ags.size(), ags.c_ptr()));
+                        else e2e.insert(curr, curr);
+                    }
+                }
+            }
+                break;
+            case AST_QUANTIFIER: {
+                UNREACHABLE();
+                quantifier * const q = to_quantifier(curr);
+                if (visited.is_marked(q->get_expr())) {
+                    //e2e.insert(q, m.mk_quantifier());
+                    visited.mark(curr, true);
+                    stack.pop_back();
+                }
+                else {
+                    stack.push_back(q->get_expr());
+                }
+            }
+                break;
+            default:
+                UNREACHABLE();
+            }
+        }
+        out = e2e[in];
+        e2e.reset();
+        visited.reset();
+    }
+protected:
+    ast_manager& m;
+};
+
+
+
 /* solver used to solve by the unquantified part. */
 inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& p);//TODO: pass factory instead
 
@@ -210,7 +289,15 @@ private:
 
         // assert an expression that must be always true (used for expressions with no universal variables) 
         void assert(expr *  e) {
-            sat->assert_expr(e);
+            if (1) {
+                expr_ref sc(m);
+                label_removal lr(m);
+                lr(e, sc);
+                sat->assert_expr(sc);
+            }
+            else {
+                sat->assert_expr(e);
+            }
         }
 
         // refine based on a counter example 
@@ -237,7 +324,7 @@ private:
         const model_ref get_model() const { return cand_model; }
 
         inline lbool operator() () {
-            //sat->display(std::cout);
+            sat->display(std::cout);
             const lbool retv = sat->check_sat(0, NULL);
             if (retv == l_true) sat->get_model(cand_model);
             return retv;
@@ -319,7 +406,15 @@ private:
             simp(ref);
             //TRACE("q2",tout << "ref3: " << mk_ismt2_pp(ref, m, 2) << endl;);
             // plug into solver 
-            sat->assert_expr(ref);
+            if (1) {
+                expr_ref sc(m);
+                label_removal lr(m);
+                lr(ref.get(), sc);
+                sat->assert_expr(sc);
+            }
+            else {
+                sat->assert_expr(ref);
+            }
         }
     private:
         ast_manager& m;
@@ -503,8 +598,8 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
     params_ref main_p;
     main_p.set_bool("elim_and", true);
     main_p.set_bool("sort_store", true);
-    main_p.set_bool("expand_select_store", true);
-    main_p.set_bool("expand_store_eq", true);
+    //main_p.set_bool("expand_select_store", true);
+    //main_p.set_bool("expand_store_eq", true);
 
     params_ref simp2_p = p;
     simp2_p.set_bool("som", true);
@@ -529,7 +624,6 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
         mk_macro_finder_tactic(m, p),
         mk_nnf_tactic(m, p)
         );
-
 
     return and_then(
         preamble_t,
