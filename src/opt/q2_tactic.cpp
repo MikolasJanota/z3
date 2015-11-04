@@ -50,6 +50,8 @@ Revision History:
 #include"bv_size_reduction_tactic.h"
 #include"ctx_simplify_tactic.h"
 #include"th_rewriter.h"
+#include"smt2parser.h"
+#include <strstream>
 
 using std::endl;
 
@@ -130,6 +132,8 @@ protected:
     ast_manager& m;
 };
 
+lbool call_external(ast_manager& m, func_decl_ref_vector& free_decls,
+    solver* s, model_ref& model, params_ref p);
 
 
 /* solver used to solve by the unquantified part. */
@@ -296,6 +300,8 @@ private:
     public:
         CandWrap(ast_manager& m, params_ref p, Mode& mode)
             : m(m)
+            , p(p)
+            , free_decls(free_decls)
             , ex_decls(m)
             , sat(mk_sat_solver(mode == UFBV, m, p))
             , simp(m)
@@ -339,13 +345,18 @@ private:
         const model_ref get_model() const { return cand_model; }
 
         inline lbool operator() () {
-            //sat->display(std::cout); return l_undef;
-            const lbool retv = sat->check_sat(0, NULL);
-            if (retv == l_true) sat->get_model(cand_model);
-            return retv;
+            if (0) {
+                return call_external(m, free_decls, sat, cand_model, p);
+            }
+            else {
+                const lbool retv = sat->check_sat(0, NULL);
+                if (retv == l_true) sat->get_model(cand_model);
+                return retv;
+            }
         }
 
     private:
+        params_ref p;
 
         //Make sure that we have a model that assigns to those and only those 
         //variables that are universally qualified. 
@@ -425,6 +436,7 @@ private:
         }
     private:
         ast_manager& m;
+        func_decl_ref_vector free_decls;
         func_decl_ref_vector ex_decls;
         solver * sat;
         model_ref cand_model;
@@ -550,6 +562,7 @@ private:
         lbool cegar() {
             int count = 0;
             while (1) {
+                //if (count) return l_undef;
                 std::cout << "it: " << ++count << endl;
                 ////////////
                 const lbool sat_res = cands(); // get cand
@@ -601,7 +614,39 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
     return rv;
 }
 
+lbool call_external(ast_manager& m, func_decl_ref_vector& free_decls,
+    solver* s, model_ref& model, params_ref p) {
+    //const char * ifn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\foo.smt2";
+    const char * ifn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\foo.smt2";
+    const char * ofn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\bar.smt2";
+    { std::ofstream out(ifn); s->display(out); out.close(); }
+    std::stringstream cms;
+    cms << "C:\\cygwin\\home\\mikolas\\git\\z3\\test\\boolector.exe"
+        << " " << "--smt2 -m --smt2-model --hex"
+        << " " << ifn
+        << " >" << ofn;
+    std::string cmdstr(cms.str());
+    std::cerr << "cmd: " << cmdstr << std::endl;
+    const int rv = system(cmdstr.c_str());
+    //int rv = 10;
+    if (rv == 10) {
+        std::ifstream is(ofn);
+        cmd_context ctx(true, &m);
+        for (unsigned i = 0; i < free_decls.size(); ++i) 
+            ctx.insert(free_decls.get(i));
+        const bool mp = parse_smt2_model(ctx, is, false, p, model);
+        if (!mp) return l_undef;
+        return l_true;
+    }
+    else if (rv == 20) {
+        return l_false;
+    }
+    std::cerr << "res: " << rv << std::endl;
+    return l_undef;
+}
+
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
+    return alloc(q2_tactic, m, p);
     params_ref main_p;
     main_p.set_bool("elim_and", true);
     main_p.set_bool("sort_store", true);

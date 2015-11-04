@@ -29,6 +29,9 @@ Revision History:
 #include"has_free_vars.h"
 #include"ast_smt2_pp.h"
 #include"parser_params.hpp"
+#include"expr_replacer.h"
+#include"expr_substitution.h"
+#include"model_smt2_pp.h"
 
 namespace smt2 {
     typedef cmd_exception parser_exception;
@@ -48,6 +51,9 @@ namespace smt2 {
         };
         symbol_table<local>  m_env;
         unsigned             m_num_bindings;
+
+        expr_substitution    m_substitution;
+        model_ref            m_parsed_model;
 
         dictionary<int>      m_sort_id2param_idx;
         dictionary<int>      m_dt_name2idx;
@@ -99,6 +105,7 @@ namespace smt2 {
         symbol               m_get_value;
         symbol               m_reset;
         symbol               m_underscore;
+        symbol               m_model;
 
         typedef std::pair<symbol, expr*> named_expr;
         named_expr           m_last_named_expr;
@@ -1148,6 +1155,7 @@ namespace smt2 {
                 expr_stack().push_back(v); // prevent v from being deleted
                 TRACE("parse_sorted_vars", tout << "registering " << *sym_it << " -> " << mk_pp(v, m()) << ", num: " << num << ", i: " << i << "\n";);
                 m_env.insert(*sym_it, local(v, m_num_bindings));
+                //m_substitution.insert(*sym_it, v);
                 SASSERT(m_env.contains(*sym_it));
                 ++sort_it;
                 ++sym_it;
@@ -1814,6 +1822,99 @@ namespace smt2 {
             next();
         }
 
+        void parse_eq(expr * e, expr_ref_vector& args) {
+           if(!m().is_eq(e)) throw parser_exception("= expected");
+           expr * const t1 = to_app(e)->get_arg(0);
+           expr * const t2 = to_app(e)->get_arg(1);
+           if(!is_var(t1)) throw parser_exception("var expected");
+           const unsigned variable_index = to_var(t1)->get_idx();
+           SASSERT(variable_index < args.size());
+           args[variable_index]=t2;
+        }
+
+        void parse_func_interp(func_decl_ref& declaration,
+                               expr * e,
+                               /*out*/func_interp * const fi) {
+            if (!m().is_ite(e)) {
+                fi->set_else(e);
+                if(!is_ground(e)) throw parser_exception("unground else part");
+                return;
+            }
+            expr * const cond = to_app(e)->get_arg(0);
+            expr * const res = to_app(e)->get_arg(1);
+            expr * const els = to_app(e)->get_arg(2);
+            if(!is_ground(res)) throw parser_exception("unground result");
+            const unsigned arity = declaration->get_arity();
+            expr_ref_vector args(m());
+            for (unsigned i=0;i < arity;  ++i) {
+                args.push_back(m().mk_var(i,declaration->get_domain(i)));
+            }
+            if (m().is_and(cond)) {
+              app * g = to_app(cond);
+              expr * const * eqs = g->get_args();
+              for (unsigned i=0;i < g->get_num_args(); ++i) {
+                  parse_eq(eqs[i],args);
+              }
+            } else {
+                parse_eq(cond,args);
+            }
+            fi->insert_new_entry(args.c_ptr(),res);
+            parse_func_interp(declaration,els,fi);// recurse in the else branch
+        }
+
+        void parse_model_define_fun() {
+            SASSERT(curr_is_identifier());
+            SASSERT(curr_id() == m_define_fun);
+            SASSERT(m_num_bindings == 0);
+            next();
+            check_identifier("invalid function/constant definition, symbol expected");
+            symbol id = curr_id();
+            next();
+            unsigned sym_spos  = symbol_stack().size();
+            unsigned sort_spos = sort_stack().size();
+            unsigned expr_spos = expr_stack().size();
+            unsigned num_vars  = parse_sorted_vars();
+            parse_sort();
+            parse_expr();
+            if (m().get_sort(expr_stack().back()) != sort_stack().back())
+                throw parser_exception("invalid function/constant definition, sort mismatch");
+            func_decl_ref fd(m());
+            //func_decl * cfd = m_ctx.find_func_decl(id);
+            //if (!cfd) throw parser_exception("function not found");
+            //if (cfd->get_arity()!=num_vars) throw parser_exception("wrong arity");
+            fd = m().mk_func_decl(id, num_vars,
+                                 sort_stack().c_ptr() + sort_spos,
+                                 sort_stack().back());
+            if (fd->get_arity()) { 
+                func_interp * const fi = alloc(func_interp, m(), num_vars);
+                parse_func_interp(fd,expr_stack().back(),fi);
+                m_parsed_model->register_decl(fd, fi);
+            } else {
+                m_parsed_model->register_decl(fd, expr_stack().back());
+            }
+            //scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m());
+            //er->set_substitution(m_substitution);
+            //expr_ref tmp;
+            //(*er)(expr_stack().back(), tmp);
+            TRACE("model_parse",
+            tout << "parsed function definition:" << id << "(\n"
+                 << mk_ismt2_pp(expr_stack().back(), m(), 2) << ")\n";);
+            TRACE("model_parse",
+                model_smt2_pp(tout << "current model(\n", m(), *(m_parsed_model.get()), 2); tout << ")\n";);
+
+            check_rparen("invalid function/constant definition, ')' expected");
+            // restore stacks & env
+            symbol_stack().shrink(sym_spos);
+            sort_stack().shrink(sort_spos);
+            expr_stack().shrink(expr_spos);
+            m_env.end_scope();
+            m_substitution.reset();
+            SASSERT(num_vars == m_num_bindings);
+            m_num_bindings = 0;
+            m_ctx.print_success();
+            next();
+        }
+
         void parse_define_fun() {
             SASSERT(curr_is_identifier());
             SASSERT(curr_id() == m_define_fun);
@@ -2310,6 +2411,18 @@ namespace smt2 {
                 i++;
             }
         }
+
+        void parse_model_cmd() {
+            SASSERT(curr_is_lparen());
+            next();
+            check_identifier("invalid command, symbol expected");
+            symbol s = curr_id();
+            if (s == m_define_fun) {
+                parse_model_define_fun();
+                return;
+            }
+            throw parser_exception("invalid command in model");
+        }
         
         void parse_cmd() {
             SASSERT(curr_is_lparen());
@@ -2379,6 +2492,8 @@ namespace smt2 {
             m_curr(scanner::NULL_TOKEN),
             m_curr_cmd(0),
             m_num_bindings(0),
+            m_substitution(ctx.m()),
+            m_parsed_model(alloc(model, ctx.m())),
             m_let("let"),
             m_bang("!"),
             m_forall("forall"),
@@ -2409,6 +2524,7 @@ namespace smt2 {
             m_get_value("get-value"),
             m_reset("reset"),
             m_underscore("_"),
+            m_model("model"),
             m_num_open_paren(0) {
             // the following assertion does not hold if ctx was already attached to an AST manager before the parser object is created.
             // SASSERT(!m_ctx.has_manager());
@@ -2512,11 +2628,94 @@ namespace smt2 {
                 SASSERT(m_num_open_paren == 0);
             }
         }
+
+        bool parse_model(model_ref& out_model) {
+            m_num_bindings    = 0;
+            bool found_errors = false;
+            m_num_open_paren = 0;
+            try {
+                scan();
+                check_identifier("invalid command, symbol expected");
+                std::cerr<<"cid:"<<curr_id()<<std::endl;
+                next();
+                if (curr() != scanner::LEFT_PAREN)
+                    throw parser_exception("invalid command, '(' expected");
+                parse_model_core();
+                out_model = m_parsed_model;
+                return true;
+            } catch (z3_error & ex) {
+                // Can't invoke error(...) when out of memory.
+                // Reason: escaped() string builder needs memory
+                m_ctx.regular_stream() << "(error \"line " << m_scanner.get_line() << " column " << m_scanner.get_pos()
+                    << ": " << ex.msg() << "\")" << std::endl;
+                exit(ex.error_code());
+            }
+            catch (stop_parser_exception) {
+                m_scanner.stop_caching();
+                return !found_errors;
+            }
+            catch (parser_exception & ex) {
+                if (ex.has_pos()) 
+                    error(ex.line(), ex.pos(), ex.msg());
+                else 
+                    error(ex.msg());
+            }
+            catch (ast_exception & ex) {
+                error(ex.msg());
+            }
+            catch (z3_exception & ex) {
+                error(ex.msg());
+            }
+            m_scanner.stop_caching();
+            reset();
+            found_errors = true;
+            if (!sync_after_error())
+                return false;
+            TRACE("parser_error", tout << "after sync: " << curr() << "\n";);
+            SASSERT(m_num_open_paren == 0);
+            return false;
+        }
+
+        bool parse_model_core() {
+            TRACE("smt2parser", tout << "mod parse core\n";);
+            SASSERT(curr_is_lparen());
+            next();
+            check_identifier("invalid command, symbol expected");
+            symbol s = curr_id();
+            if (s!=m_model)
+                throw parser_exception("`model' expected");
+            next();
+            TRACE("smt2parser", tout << "mod parse\n";);
+            while (true) {
+                switch (curr()) {
+                    case scanner::LEFT_PAREN:
+                        parse_model_cmd();
+                        break;
+                    case scanner::RIGHT_PAREN:
+                        next();
+                        return true;
+                        break;
+                    case scanner::EOF_TOKEN:
+                        return true;
+                    default:
+                        throw parser_exception("invalid token, '(' or ')' expected");
+                        break;
+                }
+            }
+        }
+
     };
 };
+
+
+bool parse_smt2_model(cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps, model_ref& model) {
+    smt2::parser p(ctx, is, interactive, ps);
+    return p.parse_model(model);
+}
 
 bool parse_smt2_commands(cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps) {
     smt2::parser p(ctx, is, interactive, ps);
     return p();
 }
+
 
