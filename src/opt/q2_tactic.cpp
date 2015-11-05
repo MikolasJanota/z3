@@ -55,6 +55,9 @@ Revision History:
 
 using std::endl;
 
+#define RUN_EXT 0
+
+
 class label_removal {
 public:
     label_removal(ast_manager& m)
@@ -132,7 +135,7 @@ protected:
     ast_manager& m;
 };
 
-lbool call_external(ast_manager& m, func_decl_ref_vector& free_decls,
+lbool call_external(ast_manager& m, const func_decl_ref_vector& free_decls,
     solver* s, model_ref& model, params_ref p);
 
 
@@ -158,7 +161,7 @@ public:
         ptr_vector<expr> flas;
         TRACE("q2", g->display(tout << "Goal:\n"););
         expr_ref_vector flas_refs(m);
-        if (0) {
+        if (!(RUN_EXT)) {
             g->get_formulas(flas);
         }
         else {
@@ -298,7 +301,10 @@ private:
     // i.e. moves for the existential player.
     class CandWrap {
     public:
-        CandWrap(ast_manager& m, params_ref p, Mode& mode)
+        CandWrap(ast_manager& m, params_ref p, 
+            Mode& mode,
+            const func_decl_ref_vector& free_decls
+            )
             : m(m)
             , p(p)
             , free_decls(free_decls)
@@ -345,7 +351,7 @@ private:
         const model_ref get_model() const { return cand_model; }
 
         inline lbool operator() () {
-            if (0) {
+            if (RUN_EXT) {
                 return call_external(m, free_decls, sat, cand_model, p);
             }
             else {
@@ -436,7 +442,7 @@ private:
         }
     private:
         ast_manager& m;
-        func_decl_ref_vector free_decls;
+        const func_decl_ref_vector& free_decls;
         func_decl_ref_vector ex_decls;
         solver * sat;
         model_ref cand_model;
@@ -457,7 +463,7 @@ private:
             , free_decls(m)
             , ex_decls(m)
             , simp(m)
-            , cands(m, p, mode)
+            , cands(m, p, mode, free_decls)
 
         {}
 
@@ -505,7 +511,7 @@ private:
                         TRACE("q2", tout << "E " << mk_ismt2_pp(v, m, 2) << endl;);
                     }
                     ex_decls.append(tmp_vs);
-                }
+                }                
                 unsigned level = 0;
                 // pull universals and make sure there are no further existentials
                 app_ref_vector forall_decls(m);
@@ -529,22 +535,26 @@ private:
                     }
                     f = tmp;
                     TRACE("q2", tout << "f:\n" << mk_ismt2_pp(f, m, 2) << endl;);
-                }
+                }                
                 TRACE("q2", tout << (level ? "quant" : "no quant") << endl;);
                 if (level) {// handle quantified formula 
                     CexWrap* const cex = alloc(CexWrap, m, p, mode);
+                    expr_ref raw_nmx(m.mk_not(f), m);
                     expr_ref nmx(m);
-                    simp(m.mk_not(f), nmx);
+                    simp(raw_nmx, nmx);
                     cex->add_forall(forall_decls);
                     cex->set_nmx(nmx);
                     //cands.init_refine(cexs.back());
                     cexs.push_back(cex);
                 }
-                else {// assert an unquantified formula 
-                    cands.assert(f);
+                else {// assert an unquantified formula
+                    expr_ref sf(m);
+                    simp(f, sf);
+                    TRACE("q2", tout << "sf:\n" << mk_ismt2_pp(sf, m, 2) << endl;);
+                    cands.assert(sf);
                 }
 
-            }
+            }            
 
             process_free_decls(m, dc.get_func_decls(), dc.get_num_decls());
             process_free_decls(m, dc.get_pred_decls(), dc.get_num_preds());
@@ -559,7 +569,7 @@ private:
             return true;
         }
 
-        lbool cegar() {
+        lbool cegar() {            
             int count = 0;
             while (1) {
                 //if (count) return l_undef;
@@ -614,23 +624,26 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
     return rv;
 }
 
-lbool call_external(ast_manager& m, func_decl_ref_vector& free_decls,
+lbool call_external(ast_manager& m, const func_decl_ref_vector& free_decls,
     solver* s, model_ref& model, params_ref p) {
-    //const char * ifn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\foo.smt2";
-    const char * ifn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\foo.smt2";
-    const char * ofn="C:\\cygwin\\home\\mikolas\\git\\z3\\test\\bar.smt2";
-    { std::ofstream out(ifn); s->display(out); out.close(); }
+    const std::string pth = "C:\\Users\\t-mikjan\\git\\z3\\testing\\"; /* C:\\cygwin\\home\\mikolas\\git\\z3\\test\\ */
+    const std::string sol = "boolector.exe";
+    const std::string ifn = "foo.smt2";
+    const std::string ofn = "bar.smt2";    
+    const std::string fifn = pth + ifn;
+    const std::string fofn = pth + ofn;
+    { std::ofstream out(fifn); s->display(out); out.close(); }
     std::stringstream cms;
-    cms << "C:\\cygwin\\home\\mikolas\\git\\z3\\test\\boolector.exe"
-        << " " << "--smt2 -m --smt2-model --hex"
-        << " " << ifn
-        << " >" << ofn;
+    cms << sol
+        << " " << "--smt2 -m --smt2-model --dec"
+        << " " << fifn
+        << " >" << fofn;
     std::string cmdstr(cms.str());
     std::cerr << "cmd: " << cmdstr << std::endl;
     const int rv = system(cmdstr.c_str());
     //int rv = 10;
     if (rv == 10) {
-        std::ifstream is(ofn);
+        std::ifstream is(fofn);
         cmd_context ctx(true, &m);
         for (unsigned i = 0; i < free_decls.size(); ++i) 
             ctx.insert(free_decls.get(i));
@@ -646,7 +659,7 @@ lbool call_external(ast_manager& m, func_decl_ref_vector& free_decls,
 }
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
-    return alloc(q2_tactic, m, p);
+    //return and_then(mk_nnf_tactic(m, p), alloc(q2_tactic, m, p));
     params_ref main_p;
     main_p.set_bool("elim_and", true);
     main_p.set_bool("sort_store", true);

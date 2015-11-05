@@ -29,9 +29,8 @@ Revision History:
 #include"has_free_vars.h"
 #include"ast_smt2_pp.h"
 #include"parser_params.hpp"
-#include"expr_replacer.h"
-#include"expr_substitution.h"
 #include"model_smt2_pp.h"
+#include"array_factory.h"
 
 namespace smt2 {
     typedef cmd_exception parser_exception;
@@ -52,7 +51,6 @@ namespace smt2 {
         symbol_table<local>  m_env;
         unsigned             m_num_bindings;
 
-        expr_substitution    m_substitution;
         model_ref            m_parsed_model;
 
         dictionary<int>      m_sort_id2param_idx;
@@ -1832,18 +1830,30 @@ namespace smt2 {
            args[variable_index]=t2;
         }
 
+        inline expr * cast_bool(const sort* s, expr* val) {
+            if (!m().is_bool(s)) return val;
+            if (m().is_bool(get_sort(val))) return val;
+            SASSERT(butil().is_bv(val));
+            return butil().is_zero(val) ? m().mk_false() : m().mk_true();
+        }
+
         void parse_func_interp(func_decl_ref& declaration,
+                               const func_decl * const ref_fd,
                                expr * e,
                                /*out*/func_interp * const fi) {
             if (!m().is_ite(e)) {
-                fi->set_else(e);
-                if(!is_ground(e)) throw parser_exception("unground else part");
+                if (!is_ground(e)) throw parser_exception("unground else part");
+                expr * const e1 = ref_fd ? cast_bool(ref_fd->get_range(), e) : e;
+                fi->set_else(e1);                
                 return;
             }
             expr * const cond = to_app(e)->get_arg(0);
-            expr * const res = to_app(e)->get_arg(1);
+            expr * const res1 = to_app(e)->get_arg(1);
             expr * const els = to_app(e)->get_arg(2);
-            if(!is_ground(res)) throw parser_exception("unground result");
+            if(!is_ground(res1)) throw parser_exception("unground result");
+            if(ref_fd&&!is_good_sort(ref_fd->get_range(), get_sort(res1))) 
+                throw parser_exception("wrong result type");
+            expr * const res = ref_fd ? cast_bool(ref_fd->get_range(), res1) : res1;
             const unsigned arity = declaration->get_arity();
             expr_ref_vector args(m());
             for (unsigned i=0;i < arity;  ++i) {
@@ -1859,7 +1869,13 @@ namespace smt2 {
                 parse_eq(cond,args);
             }
             fi->insert_new_entry(args.c_ptr(),res);
-            parse_func_interp(declaration,els,fi);// recurse in the else branch
+            parse_func_interp(declaration,ref_fd,els,fi);// recurse in the else branch
+        }
+
+        inline bool is_good_sort(const sort* refs, const sort* s) {
+            if (refs == s) return true;
+            return butil().is_bv_sort(s) && m().is_bool(refs)
+                && butil().get_bv_size(s)==1;
         }
 
         void parse_model_define_fun() {
@@ -1879,18 +1895,45 @@ namespace smt2 {
             if (m().get_sort(expr_stack().back()) != sort_stack().back())
                 throw parser_exception("invalid function/constant definition, sort mismatch");
             func_decl_ref fd(m());
-            //func_decl * cfd = m_ctx.find_func_decl(id);
-            //if (!cfd) throw parser_exception("function not found");
-            //if (cfd->get_arity()!=num_vars) throw parser_exception("wrong arity");
+            func_decl * const ref_fd = m_ctx.find_func_decl(id);
+            array_util arcg(m());
+            const bool is_array = arcg.is_array(ref_fd->get_range());
             fd = m().mk_func_decl(id, num_vars,
                                  sort_stack().c_ptr() + sort_spos,
                                  sort_stack().back());
-            if (fd->get_arity()) { 
+            
+            if (!is_array) {
+                if (ref_fd->get_arity() != num_vars) throw parser_exception("wrong arity");
+                if (!is_good_sort(ref_fd->get_range(), fd->get_range()))
+                    throw parser_exception("invalid function/constant definition, sort mismatch");
+            }
+            else {
+                if (get_array_arity(ref_fd->get_range()) != num_vars) 
+                    throw parser_exception("wrong arity");
+                if (!is_good_sort(get_array_range(ref_fd->get_range()), fd->get_range()))
+                    throw parser_exception("invalid function/constant definition, sort mismatch");                
+            }
+
+            if (num_vars) {
                 func_interp * const fi = alloc(func_interp, m(), num_vars);
-                parse_func_interp(fd,expr_stack().back(),fi);
-                m_parsed_model->register_decl(fd, fi);
+                parse_func_interp(fd,
+                    is_array ? 0 : ref_fd,
+                    expr_stack().back(),fi);
+                if (is_array) {
+                    func_decl * auxf = mk_aux_decl_for_array_sort(m(), ref_fd->get_range());
+                    parameter p[1] = { parameter(auxf) };
+                    expr * aval = m().mk_app(arcg.get_family_id(), OP_AS_ARRAY, 1, p);
+                    m_parsed_model->register_decl(auxf, fi);
+                    m_parsed_model->register_decl(ref_fd, aval);
+                }
+                else {
+                    m_parsed_model->register_decl(ref_fd, fi);
+                }
             } else {
-                m_parsed_model->register_decl(fd, expr_stack().back());
+                SASSERT(!is_array);
+                SASSERT(!ref_fd->get_arity() && !fd->get_arity());
+                m_parsed_model->register_decl(ref_fd, 
+                    cast_bool(ref_fd->get_range(), expr_stack().back()));
             }
             //scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m());
             //er->set_substitution(m_substitution);
@@ -1908,7 +1951,6 @@ namespace smt2 {
             sort_stack().shrink(sort_spos);
             expr_stack().shrink(expr_spos);
             m_env.end_scope();
-            m_substitution.reset();
             SASSERT(num_vars == m_num_bindings);
             m_num_bindings = 0;
             m_ctx.print_success();
@@ -2492,7 +2534,6 @@ namespace smt2 {
             m_curr(scanner::NULL_TOKEN),
             m_curr_cmd(0),
             m_num_bindings(0),
-            m_substitution(ctx.m()),
             m_parsed_model(alloc(model, ctx.m())),
             m_let("let"),
             m_bang("!"),
@@ -2636,7 +2677,6 @@ namespace smt2 {
             try {
                 scan();
                 check_identifier("invalid command, symbol expected");
-                std::cerr<<"cid:"<<curr_id()<<std::endl;
                 next();
                 if (curr() != scanner::LEFT_PAREN)
                     throw parser_exception("invalid command, '(' expected");
