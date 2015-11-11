@@ -823,6 +823,34 @@ void cmd_context::insert(symbol const & s, object_ref * r) {
 }
 
 
+func_decl * cmd_context::find_func_decl_for_model(symbol const & s) const {
+    builtin_decl d;
+    if (m_builtin_decls.find(s, d)) {
+        try {
+            // Remark: ignoring m_next of d. We do not allow two different theories to define the same constant name.
+            func_decl * f;
+            f = m().mk_func_decl(d.m_fid, d.m_decl, 0, 0, 0, static_cast<sort*const*>(0), 0);
+            if (f != 0)
+                return f;
+        }
+        catch (ast_exception &) {
+        }
+        throw cmd_exception("invalid function declaration reference, must provide signature for builtin symbol ", s);
+    }
+    if (m_macros.contains(s))
+        throw cmd_exception("invalid function declaration reference, named expressions (aka macros) cannot be referenced ", s);
+    func_decls fs;
+    if (m_func_decls.find(s, fs)) {
+        if (fs.more_than_one())
+            throw cmd_exception("ambiguous function declaration reference, provide full signature to disumbiguate (<symbol> (<sort>*) <sort>) ", s);
+        return fs.first();
+    }
+    return 0;
+}
+
+
+
+
 func_decl * cmd_context::find_func_decl(symbol const & s) const {
     builtin_decl d;
     if (m_builtin_decls.find(s, d)) {

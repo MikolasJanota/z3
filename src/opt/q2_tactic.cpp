@@ -55,8 +55,7 @@ Revision History:
 
 using std::endl;
 
-#define RUN_EXT 0
-
+#define RUN_EXT 1
 
 class label_removal {
 public:
@@ -167,8 +166,12 @@ public:
         else {
             for (unsigned i = 0; i < g->size(); i++) {
                 expr_ref sc(m);
+                expr_ref tmp(m);
                 label_removal lr(m);
-                lr(g->form(i), sc);
+                sc=g->form(i);
+                lr(sc, tmp);
+                sc=tmp;
+                sc=tmp;
                 flas_refs.push_back(sc);
                 flas.push_back(sc.get());
                 if (sc.get() != g->form(i)) {
@@ -626,13 +629,19 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
 
 lbool call_external(ast_manager& m, const func_decl_ref_vector& free_decls,
     solver* s, model_ref& model, params_ref p) {
-    const std::string pth = "C:\\Users\\t-mikjan\\git\\z3\\testing\\"; /* C:\\cygwin\\home\\mikolas\\git\\z3\\test\\ */
-    const std::string sol = "boolector.exe";
+    const std::string pth = "";// "C:\\Users\\t-mikjan\\git\\z3\\testing\\"; /* C:\\cygwin\\home\\mikolas\\git\\z3\\test\\ */
+    const std::string sol = "boolector-207.exe";
     const std::string ifn = "foo.smt2";
-    const std::string ofn = "bar.smt2";    
+    const std::string ifn1 = "foo1.smt2";
+    const std::string ofn = "bar.smt2";
     const std::string fifn = pth + ifn;
     const std::string fofn = pth + ofn;
-    { std::ofstream out(fifn); s->display(out); out.close(); }
+    { std::ofstream out("foo1.smt2"); s->display(out); out.close(); }
+
+    const char * cmd1 = "boolector-211.exe --dump-smt2 -x -rwl 0 foo1.smt2  >foo.smt2";
+    std::cerr << "cmd: " << cmd1 << std::endl;
+    const int rv1 = system(cmd1);
+    if (rv1) return l_undef;
     std::stringstream cms;
     cms << sol
         << " " << "--smt2 -m --smt2-model --dec"

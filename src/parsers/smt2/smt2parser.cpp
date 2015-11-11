@@ -1894,24 +1894,28 @@ namespace smt2 {
             parse_expr();
             if (m().get_sort(expr_stack().back()) != sort_stack().back())
                 throw parser_exception("invalid function/constant definition, sort mismatch");
-            func_decl_ref fd(m());
-            func_decl * const ref_fd = m_ctx.find_func_decl(id);
             array_util arcg(m());
-            const bool is_array = arcg.is_array(ref_fd->get_range());
+            func_decl_ref fd(m());
+/////
+            func_decl * ref_fd = m_ctx.find_func_decl_for_model(id);           
+            ////           
             fd = m().mk_func_decl(id, num_vars,
                                  sort_stack().c_ptr() + sort_spos,
                                  sort_stack().back());
-            
+            if (!ref_fd) ref_fd = fd.get();
+            const bool is_array = ref_fd && arcg.is_array(ref_fd->get_range());
+            SASSERT(ref_fd);
             if (!is_array) {
                 if (ref_fd->get_arity() != num_vars) throw parser_exception("wrong arity");
                 if (!is_good_sort(ref_fd->get_range(), fd->get_range()))
                     throw parser_exception("invalid function/constant definition, sort mismatch");
             }
             else {
-                if (get_array_arity(ref_fd->get_range()) != num_vars) 
+                SASSERT(ref_fd);
+                if (get_array_arity(ref_fd->get_range()) != num_vars)
                     throw parser_exception("wrong arity");
                 if (!is_good_sort(get_array_range(ref_fd->get_range()), fd->get_range()))
-                    throw parser_exception("invalid function/constant definition, sort mismatch");                
+                    throw parser_exception("invalid function/constant definition, sort mismatch");
             }
 
             if (num_vars) {
@@ -1920,6 +1924,7 @@ namespace smt2 {
                     is_array ? 0 : ref_fd,
                     expr_stack().back(),fi);
                 if (is_array) {
+                    SASSERT(ref_fd);
                     func_decl * auxf = mk_aux_decl_for_array_sort(m(), ref_fd->get_range());
                     parameter p[1] = { parameter(auxf) };
                     expr * aval = m().mk_app(arcg.get_family_id(), OP_AS_ARRAY, 1, p);
