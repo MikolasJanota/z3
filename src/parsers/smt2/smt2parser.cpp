@@ -30,7 +30,19 @@ Revision History:
 #include"ast_smt2_pp.h"
 #include"parser_params.hpp"
 #include"model_smt2_pp.h"
-#include"array_factory.h"
+
+// copied from "array_factory.h" due to circ deps
+func_decl * mk_aux_decl_for_array_sort(ast_manager & m, sort * s);
+//    ptr_buffer<sort> domain;
+//    sort * range = get_array_range(s);
+//    unsigned arity = get_array_arity(s);
+//    for (unsigned i = 0; i < arity; i++) {
+//        domain.push_back(get_array_domain(s, i));
+//    }
+//    return m.mk_fresh_func_decl(symbol::null, symbol::null, arity, domain.c_ptr(), range);
+//}
+
+
 
 namespace smt2 {
     typedef cmd_exception parser_exception;
@@ -2542,7 +2554,7 @@ namespace smt2 {
             m_curr(scanner::NULL_TOKEN),
             m_curr_cmd(0),
             m_num_bindings(0),
-            m_parsed_model(alloc(model, ctx.m())),
+            m_parsed_model(0),
             m_let("let"),
             m_bang("!"),
             m_forall("forall"),
@@ -2688,6 +2700,7 @@ namespace smt2 {
                 next();
                 if (curr() != scanner::LEFT_PAREN)
                     throw parser_exception("invalid command, '(' expected");
+                m_parsed_model = alloc(model, m());
                 parse_model_core();
                 out_model = m_parsed_model;
                 return true;

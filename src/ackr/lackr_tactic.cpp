@@ -33,6 +33,7 @@ Revision History:
 ///////////////
 #include"expr_replacer.h"
 #include"array_decl_plugin.h"
+#include"th_rewriter.h"
 
 class lackr_tactic : public tactic {
 public:
@@ -77,17 +78,26 @@ private:
           , sat(0)
           , bu(m)
           , au(m)
+          , consts(m)
+          , subst(m)
+          , simp(m)
+          , ackrs(m)
         {}
 
         lbool operator() () {
-            sat = mk_inc_sat_solver(m, p);
-            //tactic_ref t = mk_qfaufbv_tactic(m, p);
-            //sat = mk_tactic2solver(m, t.get(), p);
-            sat->set_produce_models(true);
+            if(0){
+                std::cout << "c inc sat\n";
+                sat = mk_inc_sat_solver(m, p);
+            } else {
+                std::cout << "c smt sat\n";
+                tactic_ref t = mk_qfaufbv_tactic(m, p);
+                sat = mk_tactic2solver(m, t.get(), p);
+            }
             SASSERT(sat);
+            sat->set_produce_models(true);
             const bool ok = init();
             if (!ok) return l_undef;
-            //sat->display(std::cout);
+            TRACE("lackr", tout << "sat goal\n"; sat->display(tout););
             TRACE("lackr", tout << "run sat\n"; );
             const lbool rv = sat->check_sat(0, 0);
             TRACE("lackr", tout << "sat:" << rv << '\n'; );
@@ -113,20 +123,33 @@ private:
         scoped_ptr<solver> sat;
         bv_util bu;
         array_util au;
+        expr_ref_vector consts;
+        expr_substitution subst;
+        scoped_ptr<expr_replacer> m_er;
+        th_rewriter simp;
+        expr_ref_vector ackrs;
 
         bool init() {
-          return get_terms() && abstract() && ackr();
+            params_ref simp_p;
+            simp_p.set_bool("pull_cheap_ite", true);
+            simp.updt_params(p);
+            m_er = mk_default_expr_replacer(m);
+            bool iok = get_terms() && abstract() && ackr();
+            if (!iok) return false;
+            ackrs.push_back(a);
+            expr_ref all(m);
+            all = m.mk_and(ackrs.size(), ackrs.c_ptr());
+            simp(all);
+            sat->assert_expr(all);
+            return true;
         }
 
         bool ackr(app * const t1, app * const t2) {
-            TRACE("lackr", tout << "ackr"
+            TRACE("lackr", tout << "ackr "
                 << mk_ismt2_pp(t1, m, 2)
                 << " , "
                 << mk_ismt2_pp(t2, m, 2) << "\n";);
-            app * const a1 = t2c[t1];
-            app * const a2 = t2c[t2];
-            const unsigned sz = t1->get_num_args();
-            expr_ref cg(m.mk_true(), m);
+            const unsigned sz = t1->get_num_args();            
             expr_ref_vector eqs(m);
             const unsigned six = au.is_select(t1) ? 1 : 0;
             for (unsigned gi = six; gi < sz; ++gi) {
@@ -141,10 +164,24 @@ private:
                 }
                 eqs.push_back(m.mk_eq(arg1, arg2));
             }
-            cg = m.mk_and(eqs.size(), eqs.c_ptr());
-            cg = m.mk_implies(cg, m.mk_eq(a1, a2));
+            app * const a1 = t2c[t1];
+            app * const a2 = t2c[t2];
+            SASSERT(a1);
+            SASSERT(a2);
+            TRACE("lackr", tout << "abstr1 " << mk_ismt2_pp(a1, m, 2) << "\n";);
+            TRACE("lackr", tout << "abstr2 " << mk_ismt2_pp(a2, m, 2) << "\n";);
+            expr_ref lhs(m.mk_and(eqs.size(), eqs.c_ptr()), m);
+            TRACE("lackr", tout << "ackr constr lhs" << mk_ismt2_pp(lhs, m, 2) << "\n";);
+            expr_ref rhs(m.mk_eq(a1, a2),m);
+            TRACE("lackr", tout << "ackr constr rhs" << mk_ismt2_pp(rhs, m, 2) << "\n";);
+            expr_ref cg(m.mk_implies(lhs, rhs), m);
             TRACE("lackr", tout << "ackr constr" << mk_ismt2_pp(cg, m, 2) << "\n";);
-            sat->assert_expr(cg.get());
+            expr_ref cga(m);
+            (*m_er)(cg, cga);
+            simp(cga);
+            TRACE("lackr", tout << "ackr constr abs:" << mk_ismt2_pp(cga, m, 2) << "\n";);
+            if (!m.is_true(cga)) ackrs.push_back(cga);
+            //sat->assert_expr(cga.get());
             return true;
         }
 
@@ -153,12 +190,12 @@ private:
             for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
                 func_decl* const fd = i->m_key;
                 app_set * const ts = i->get_value();
-                sort* const s = fd->get_range();
                 const app_set::iterator r = ts->end();
                 for (app_set::iterator j = ts->begin(); j != r; ++j) {
-                    for (app_set::iterator k = j; k != r; ++k) {
+                for (app_set::iterator k = ts->begin(); k != r; ++k) {
                         app * const t1 = *j;
                         app * const t2 = *k;
+                        if (t1->get_id() >= t2->get_id()) continue;
                         SASSERT(t1->get_decl() == fd);
                         SASSERT(t2->get_decl() == fd);
                         if (t1 == t2) continue;
@@ -171,7 +208,6 @@ private:
 
         bool abstract() {
             const f2tt::iterator e = f2t.end();
-            expr_substitution subst(m);
             for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
                 func_decl* const fd = i->m_key;
                 app_set * const ts = i->get_value();
@@ -180,6 +216,7 @@ private:
                 for (app_set::iterator j = ts->begin(); j != r; ++j) {
                     app * const fc = m.mk_fresh_const(fd->get_name().str().c_str(), s);
                     app * const t = *j;
+                    consts.push_back(fc);
                     SASSERT(t->get_decl() == fd);
                     t2c.insert(t, fc);
                     subst.insert(t, fc);
@@ -190,9 +227,9 @@ private:
                         << "\n";);
                 }
             }
-            scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
-            er->set_substitution(&subst);
-            (*er)(f.get(), a);
+            m_er->set_substitution(&subst);
+            (*m_er)(f.get(), a);
+            simp(a);
             sat->assert_expr(a);
             TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(a.get(), m, 2) << ")\n";);
             return true;
