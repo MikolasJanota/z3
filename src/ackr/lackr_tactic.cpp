@@ -18,6 +18,7 @@ Revision History:
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
+#include"qfbv_tactic.h"
 #include"tactic2solver.h"
 ///////////////
 #include"solve_eqs_tactic.h"
@@ -85,9 +86,12 @@ private:
         {}
 
         lbool operator() () {
-            if(0){
-                std::cout << "c inc sat\n";
-                sat = mk_inc_sat_solver(m, p);
+            if(1){
+                std::cout << "c qfbv sat\n";
+                //std::cout << "c inc sat\n";
+                //sat = mk_inc_sat_solver(m, p);
+                tactic_ref t = mk_qfbv_tactic(m, p);
+                sat = mk_tactic2solver(m, t.get(), p);
             } else {
                 std::cout << "c smt sat\n";
                 tactic_ref t = mk_qfaufbv_tactic(m, p);
@@ -131,7 +135,7 @@ private:
 
         bool init() {
             params_ref simp_p;
-            simp_p.set_bool("pull_cheap_ite", true);
+            //simp_p.set_bool("pull_cheap_ite", true);
             simp.updt_params(p);
             m_er = mk_default_expr_replacer(m);
             bool iok = get_terms() && abstract() && ackr();
@@ -153,7 +157,6 @@ private:
             expr_ref_vector eqs(m);
             const unsigned six = au.is_select(t1) ? 1 : 0;
             for (unsigned gi = six; gi < sz; ++gi) {
-                //cg = m.mk_and(m.mk_eq(t1->get_arg(gi), t2->get_arg(gi)), cg);
                 expr * const arg1 = t1->get_arg(gi);
                 expr * const arg2 = t2->get_arg(gi);
                 if (arg1 == arg2) continue;
@@ -229,8 +232,8 @@ private:
             }
             m_er->set_substitution(&subst);
             (*m_er)(f.get(), a);
-            simp(a);
-            sat->assert_expr(a);
+            //simp(a);
+            //sat->assert_expr(a);
             TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(a.get(), m, 2) << ")\n";);
             return true;
         }
@@ -302,9 +305,9 @@ private:
 
 tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
     //return alloc(lackr_tactic, m, p);
-    params_ref main_p;
-    main_p.set_bool("elim_and", true);
-    main_p.set_bool("sort_store", true);
+    //params_ref main_p;
+    //main_p.set_bool("elim_and", true);
+    //main_p.set_bool("sort_store", true);
     //main_p.set_bool("expand_select_store", true);
     //main_p.set_bool("expand_store_eq", true);
 
