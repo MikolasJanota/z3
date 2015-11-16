@@ -35,6 +35,8 @@ Revision History:
 #include"expr_replacer.h"
 #include"array_decl_plugin.h"
 #include"th_rewriter.h"
+#include"ackr_info.h"
+#include"lackr_model_converter.h"
 
 class lackr_tactic : public tactic {
 public:
@@ -47,6 +49,7 @@ public:
         model_converter_ref & mc,
         proof_converter_ref & pc,
         expr_dependency_ref & core) {
+        mc = 0;
         ast_manager& m(g->m());
         TRACE("lackr", g->display(tout << "Goal:\n"););
         ptr_vector<expr> flas;
@@ -61,7 +64,9 @@ public:
         goal_ref resg(alloc(goal, *g, true));
         if (o == l_false) resg->assert_expr(m.mk_false());
         if (o != l_undef) result.push_back(resg.get());
-        // TODO Report model
+        // report model
+        //if (g->models_enabled())
+        //    mc = mk_lackr_model_converter(m,i.get_info());
     }
     virtual void cleanup() { }
 
@@ -114,16 +119,17 @@ private:
                 dealloc(i->get_value());
             }
         }
+
+        ackr_info& get_info() {return info;}
       private:
         typedef obj_hashtable<app> app_set;
         typedef obj_map<func_decl, app_set*> f2tt;
-        typedef obj_map<expr, app*> t2ct;
         ast_manager& m;
         params_ref p;
         expr_ref f;
         expr_ref a;
         f2tt f2t;
-        t2ct t2c;
+        ackr_info info;
         scoped_ptr<solver> sat;
         bv_util bu;
         array_util au;
@@ -167,8 +173,8 @@ private:
                 }
                 eqs.push_back(m.mk_eq(arg1, arg2));
             }
-            app * const a1 = t2c[t1];
-            app * const a2 = t2c[t2];
+            app * const a1 = info.get_abstr(t1);
+            app * const a2 = info.get_abstr(t2);
             SASSERT(a1);
             SASSERT(a2);
             TRACE("lackr", tout << "abstr1 " << mk_ismt2_pp(a1, m, 2) << "\n";);
@@ -221,7 +227,7 @@ private:
                     app * const t = *j;
                     consts.push_back(fc);
                     SASSERT(t->get_decl() == fd);
-                    t2c.insert(t, fc);
+                    info.set_abstr(t, fc);
                     subst.insert(t, fc);
                     TRACE("lackr", tout << "abstr term "
                         << mk_ismt2_pp(t, m, 2)
