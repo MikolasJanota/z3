@@ -32,11 +32,12 @@ Revision History:
 #include"nnf_tactic.h"
 #include"macro_finder_tactic.h"
 ///////////////
-#include"expr_replacer.h"
 #include"array_decl_plugin.h"
 #include"th_rewriter.h"
 #include"ackr_info.h"
 #include"lackr_model_converter.h"
+///////////////
+#include"model_smt2_pp.h"
 
 class lackr_tactic : public tactic {
 public:
@@ -65,8 +66,10 @@ public:
         if (o == l_false) resg->assert_expr(m.mk_false());
         if (o != l_undef) result.push_back(resg.get());
         // report model
-        //if (g->models_enabled())
-        //    mc = mk_lackr_model_converter(m,i.get_info());
+        if (g->models_enabled() && (o == l_true)) {
+            model_ref abstr_model = i.get_model();
+            mc = mk_lackr_model_converter(m, i.get_info(), abstr_model);
+        }
     }
     virtual void cleanup() { }
 
@@ -84,8 +87,6 @@ private:
           , sat(0)
           , bu(m)
           , au(m)
-          , consts(m)
-          , subst(m)
           , simp(m)
           , ackrs(m)
         {}
@@ -107,9 +108,16 @@ private:
             const bool ok = init();
             if (!ok) return l_undef;
             TRACE("lackr", tout << "sat goal\n"; sat->display(tout););
+            //std::cout << "sat goal\n"; sat->display(std::cout);
             TRACE("lackr", tout << "run sat\n"; );
             const lbool rv = sat->check_sat(0, 0);
+            if (rv == l_true) sat->get_model(m_model);
+
             TRACE("lackr", tout << "sat:" << rv << '\n'; );
+            TRACE("lackr",
+                if (rv == l_true)
+                   model_smt2_pp(tout << "abstr_model(\n", m, *(m_model.get()), 2); tout << ")\n";
+            );
             return rv;
           }
 
@@ -120,7 +128,8 @@ private:
             }
         }
 
-        ackr_info& get_info() {return info;}
+        ackr_info_ref get_info() {return info;}
+        model_ref get_model() { return m_model; }
       private:
         typedef obj_hashtable<app> app_set;
         typedef obj_map<func_decl, app_set*> f2tt;
@@ -129,21 +138,19 @@ private:
         expr_ref f;
         expr_ref a;
         f2tt f2t;
-        ackr_info info;
+        ackr_info_ref info;
         scoped_ptr<solver> sat;
         bv_util bu;
         array_util au;
-        expr_ref_vector consts;
-        expr_substitution subst;
-        scoped_ptr<expr_replacer> m_er;
         th_rewriter simp;
         expr_ref_vector ackrs;
+        model_ref m_model;
 
         bool init() {
             params_ref simp_p;
             //simp_p.set_bool("pull_cheap_ite", true);
             simp.updt_params(p);
-            m_er = mk_default_expr_replacer(m);
+            info = alloc(ackr_info, m);
             bool iok = get_terms() && abstract() && ackr();
             if (!iok) return false;
             ackrs.push_back(a);
@@ -173,8 +180,8 @@ private:
                 }
                 eqs.push_back(m.mk_eq(arg1, arg2));
             }
-            app * const a1 = info.get_abstr(t1);
-            app * const a2 = info.get_abstr(t2);
+            app * const a1 = info->get_abstr(t1);
+            app * const a2 = info->get_abstr(t2);
             SASSERT(a1);
             SASSERT(a2);
             TRACE("lackr", tout << "abstr1 " << mk_ismt2_pp(a1, m, 2) << "\n";);
@@ -186,7 +193,7 @@ private:
             expr_ref cg(m.mk_implies(lhs, rhs), m);
             TRACE("lackr", tout << "ackr constr" << mk_ismt2_pp(cg, m, 2) << "\n";);
             expr_ref cga(m);
-            (*m_er)(cg, cga);
+            info->abstract(cg, cga);
             simp(cga);
             TRACE("lackr", tout << "ackr constr abs:" << mk_ismt2_pp(cga, m, 2) << "\n";);
             if (!m.is_true(cga)) ackrs.push_back(cga);
@@ -225,10 +232,8 @@ private:
                 for (app_set::iterator j = ts->begin(); j != r; ++j) {
                     app * const fc = m.mk_fresh_const(fd->get_name().str().c_str(), s);
                     app * const t = *j;
-                    consts.push_back(fc);
                     SASSERT(t->get_decl() == fd);
-                    info.set_abstr(t, fc);
-                    subst.insert(t, fc);
+                    info->set_abstr(t, fc);
                     TRACE("lackr", tout << "abstr term "
                         << mk_ismt2_pp(t, m, 2)
                         << " -> "
@@ -236,8 +241,8 @@ private:
                         << "\n";);
                 }
             }
-            m_er->set_substitution(&subst);
-            (*m_er)(f.get(), a);
+            info->seal();
+            info->abstract(f.get(), a);
             //simp(a);
             //sat->assert_expr(a);
             TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(a.get(), m, 2) << ")\n";);
