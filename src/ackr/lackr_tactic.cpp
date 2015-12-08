@@ -36,6 +36,7 @@ Revision History:
 #include"th_rewriter.h"
 #include"ackr_info.h"
 #include"lackr_model_converter.h"
+#include"model_constructor.h"
 ///////////////
 #include"model_smt2_pp.h"
 
@@ -175,6 +176,10 @@ private:
             TRACE("lackr", tout << "run sat\n"; );
             const lbool rv = sat->check_sat(0, 0);
             if (rv == l_true) sat->get_model(m_model);
+            //if (rv == l_true) {
+            //    model_constructor mc(m, info);
+            //    SASSERT(mc.check(m_model));
+            //}
 
             TRACE("lackr", tout << "sat:" << rv << '\n'; );
             TRACE("lackr",
