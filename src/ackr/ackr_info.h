@@ -20,32 +20,28 @@ Revision History:
 #include"ref.h"
 #include"expr_replacer.h"
 
+//
+// Information about how a formula was extracted into
+// a formula without  uninterpreted function symbols.
+//
+// The intended use is that new terms are added via set_abstr.
+// Once all terms are abstracted, call seal.
+// abstract may only be called when sealed.
+//
+//  The class enables reference counting.
 class ackr_info {
     public:
         ackr_info(ast_manager& m)
         : m_m(m)
         , m_consts(m)
-        , m_ref_count(0)
         , m_er(mk_default_expr_replacer(m))
         , m_subst(m_m)
+        , m_ref_count(0)
         , m_sealed(false)
         {}
 
         virtual ~ackr_info() {
-            //std::cout << "~ackr_info()" << std::endl;
             m_consts.reset();
-        }
-
-        inline app* find_term(func_decl* c)  const {
-            app *  rv = 0;
-            m_c2t.find(c,rv);
-            return rv;
-        }
-
-        inline app* get_abstr(app* term)  const {
-            app * const rv = m_t2c.find(term);
-            SASSERT(rv);
-            return rv;
         }
 
         inline void set_abstr(app* term, app* c) {
@@ -60,6 +56,18 @@ class ackr_info {
         inline void abstract(expr * e, expr_ref& res) {
             SASSERT(m_sealed);
             (*m_er)(e, res);
+        }
+
+        inline app* find_term(func_decl* c)  const {
+            app * rv = 0;
+            m_c2t.find(c,rv);
+            return rv;
+        }
+
+        inline app* get_abstr(app* term)  const {
+            app * const rv = m_t2c.find(term);
+            SASSERT(rv);
+            return rv;
         }
 
         inline void seal() {
@@ -80,14 +88,18 @@ class ackr_info {
     private:
         typedef obj_map<app, app*> t2ct;
         typedef obj_map<func_decl, app*> c2tt;
-        t2ct m_t2c;
-        c2tt m_c2t;
-        expr_ref_vector m_consts;
-        unsigned m_ref_count;
         ast_manager& m_m;
+
+        t2ct m_t2c; // terms to constants
+        c2tt m_c2t; // constants to terms (inversion of m_t2c)
+        expr_ref_vector m_consts; // the constants introduced during abstraction
+
+        // replacer and substitution used to compute abstractions
         scoped_ptr<expr_replacer> m_er;
         expr_substitution m_subst;
-        bool m_sealed;
+
+        bool m_sealed; // debugging
+        unsigned m_ref_count; // reference counting
 };
 
 typedef ref<ackr_info> ackr_info_ref;

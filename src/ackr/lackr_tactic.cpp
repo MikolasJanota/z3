@@ -100,6 +100,7 @@ public:
         mc = 0;
         ast_manager& m(g->m());
         TRACE("lackr", g->display(tout << "Goal:\n"););
+        // conflate all assertions into one conjunction
         ptr_vector<expr> flas;
         g->get_formulas(flas);
         expr_ref f(m);
@@ -118,6 +119,7 @@ public:
             mc = mk_lackr_model_converter(m, i.get_info(), abstr_model);
         }
     }
+
     virtual void cleanup() { }
 
     virtual tactic* translate(ast_manager& m) {
@@ -213,7 +215,7 @@ private:
  //           simp_p.set_bool("ite_extra_rules", true);
             simp.updt_params(simp_p);
             info = alloc(ackr_info, m);
-            bool iok = get_terms() && abstract() && ackr();
+            bool iok = collect_terms() && abstract() && eager_ackr();
             if (!iok) return false;
             ackrs.push_back(a);
             expr_ref all(m);
@@ -223,12 +225,15 @@ private:
             return true;
         }
 
+        //
+        // Introduce ackermann lemma for the two given terms.
+        //
         bool ackr(app * const t1, app * const t2) {
             TRACE("lackr", tout << "ackr "
                 << mk_ismt2_pp(t1, m, 2)
                 << " , "
                 << mk_ismt2_pp(t2, m, 2) << "\n";);
-            const unsigned sz = t1->get_num_args();            
+            const unsigned sz = t1->get_num_args();
             expr_ref_vector eqs(m);
             const unsigned six = au.is_select(t1) ? 1 : 0;
             for (unsigned gi = six; gi < sz; ++gi) {
@@ -263,17 +268,22 @@ private:
             return true;
         }
 
-        bool ackr() {
+        //
+        // Introduce the ackermann lemma for each pair of terms.
+        //
+        bool eager_ackr() {
             const f2tt::iterator e = f2t.end();
             for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
                 func_decl* const fd = i->m_key;
                 app_set * const ts = i->get_value();
                 const app_set::iterator r = ts->end();
                 for (app_set::iterator j = ts->begin(); j != r; ++j) {
-                for (app_set::iterator k = ts->begin(); k != r; ++k) {
+                    app_set::iterator k = j;
+                    ++k;
+                    for (;  k != r; ++k) {
                         app * const t1 = *j;
                         app * const t2 = *k;
-                        if (t1->get_id() >= t2->get_id()) continue;
+                        //   if (t1->get_id() >= t2->get_id()) continue;
                         SASSERT(t1->get_decl() == fd);
                         SASSERT(t2->get_decl() == fd);
                         if (t1 == t2) continue;
@@ -327,48 +337,48 @@ private:
             ts->insert(a);
         }
 
-        bool get_terms() {
-          ptr_vector<expr> stack;
-          expr *           curr;
-          expr_mark        visited;
-          stack.push_back(f.get());
-          while (!stack.empty()) {
-            curr = stack.back();
-            if (visited.is_marked(curr)) {
-              stack.pop_back();
-              continue;
-            }
+        bool collect_terms() {
+            ptr_vector<expr> stack;
+            expr *           curr;
+            expr_mark        visited;
+            stack.push_back(f.get());
+            while (!stack.empty()) {
+                curr = stack.back();
+                if (visited.is_marked(curr)) {
+                    stack.pop_back();
+                    continue;
+                }
 
-            switch (curr->get_kind()) {
-              case AST_VAR:
-                visited.mark(curr, true);
-                stack.pop_back();
-                break;
+                switch (curr->get_kind()) {
+                    case AST_VAR:
+                        visited.mark(curr, true);
+                        stack.pop_back();
+                        break;
 
-              case AST_APP:
-                if (for_each_expr_args(stack, visited,
-                      to_app(curr)->get_num_args(), to_app(curr)->get_args())) {
-                  visited.mark(curr, true);
-                  stack.pop_back();
-                  add_term(to_app(curr));
+                    case AST_APP:
+                        if (for_each_expr_args(stack, visited,
+                                    to_app(curr)->get_num_args(), to_app(curr)->get_args())) {
+                            visited.mark(curr, true);
+                            stack.pop_back();
+                            add_term(to_app(curr));
+                        }
+                        break;
+                    case AST_QUANTIFIER:
+                        if (visited.is_marked(to_quantifier(curr)->get_expr())) {
+                            visited.mark(curr, true);
+                            stack.pop_back();
+                        }
+                        else {
+                            stack.push_back(to_quantifier(curr)->get_expr());
+                        }
+                        break;
+                    default:
+                        UNREACHABLE();
+                        return false;
                 }
-                break;
-              case AST_QUANTIFIER:
-                if (visited.is_marked(to_quantifier(curr)->get_expr())) {
-                  visited.mark(curr, true);
-                  stack.pop_back();
-                }
-                else {
-                  stack.push_back(to_quantifier(curr)->get_expr());
-                }
-                break;
-              default:
-                UNREACHABLE();
-                return false;
             }
-          }
-          visited.reset();
-          return true;
+            visited.reset();
+            return true;
         }
     };
 private:
