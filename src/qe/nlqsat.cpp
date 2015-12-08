@@ -42,6 +42,7 @@ namespace qe {
     class nlqsat : public tactic {
 
         typedef unsigned_vector assumption_vector;
+        typedef nlsat::scoped_literal_vector clause;
 
         struct stats {
             unsigned m_num_rounds;        
@@ -110,7 +111,8 @@ namespace qe {
             m_asms.push_back(is_exists()?m_is_true:~m_is_true);
             m_asms.append(m_assumptions);
             TRACE("qe", tout << "model valid: " << m_valid_model << " level: " << lvl << " "; 
-                  display_assumptions(tout););
+                  display_assumptions(tout);
+                  m_solver.display(tout););
 
             if (!m_valid_model) {
                 m_asms.append(m_cached_asms);
@@ -140,13 +142,15 @@ namespace qe {
                     }
                 }
             }
-            TRACE("qe", display(tout););
+            TRACE("qe", display(tout);
+                  for (unsigned i = 0; i < m_asms.size(); ++i) {
+                      m_solver.display(tout, m_asms[i]); tout << "\n";
+                  });
             save_model();
         }
 
         void add_literal(nlsat::literal_vector& lits, nlsat::literal l) {
             lbool r = m_solver.value(l);
-            TRACE("qe", m_solver.display(tout, l); tout << " := " << r << "\n";);
             switch (r) {
             case l_true:
                 lits.push_back(l);
@@ -156,7 +160,7 @@ namespace qe {
                 break;
             default:
                 UNREACHABLE();
-                break;
+                break; 
             }
         }
 
@@ -167,9 +171,15 @@ namespace qe {
             }
         }
         
+
         void mbp(unsigned level, nlsat::scoped_literal_vector& result) {
             nlsat::var_vector vars;
             uint_set fvars;
+            extract_vars(level, vars, fvars);
+            mbp(vars, fvars, result);
+        }
+
+        void extract_vars(unsigned level, nlsat::var_vector& vars, uint_set& fvars) {
             for (unsigned i = 0; i < m_bound_rvars.size(); ++i) {
                 if (i < level) {
                     insert_set(fvars, m_bound_bvars[i]);
@@ -178,7 +188,9 @@ namespace qe {
                     vars.append(m_bound_rvars[i]);
                 }
             }
-            
+        }
+
+        void mbp(nlsat::var_vector const& vars, uint_set const& fvars, clause& result) {
             // 
             // Also project auxiliary variables from clausification.
             // 
@@ -202,11 +214,15 @@ namespace qe {
                 new_result.reset();
                 ex.project(vars[i], result.size(), result.c_ptr(), new_result);
                 result.swap(new_result);
+                TRACE("qe", m_solver.display(tout, result.size(), result.c_ptr()); tout << "\n";);
             }
+            negate_clause(result);
+        }
+
+        void negate_clause(clause& result) {
             for (unsigned i = 0; i < result.size(); ++i) {
                 result.set(i, ~result[i]);
             }
-            TRACE("qe", m_solver.display(tout, result.size(), result.c_ptr()); tout << "\n";);
         }
 
         void save_model() {
@@ -237,13 +253,21 @@ namespace qe {
             return m_cached_asms_lim.size();
         }
 
-        max_level mk_clause(unsigned n, nlsat::literal const* ls) {
-            nlsat::literal_vector lits(n, ls);
-            if (lits.empty()) {
-                lits.push_back(~m_solver.mk_true()); 
+        void enforce_parity(clause& cl) {
+            cl.push_back(is_exists()?~m_is_true:m_is_true);
+        }
+
+        void add_clause(clause& cl) {
+            if (cl.empty()) {
+                cl.push_back(~m_solver.mk_true());
             }
+            SASSERT(!cl.empty());
+            nlsat::literal_vector lits(cl.size(), cl.c_ptr());
             m_solver.mk_clause(lits.size(), lits.c_ptr());
-            return get_level(n, ls);
+        }
+
+        max_level get_level(clause const& cl) {
+            return get_level(cl.size(), cl.c_ptr());
         }
 
         max_level get_level(unsigned n, nlsat::literal const* ls) {
@@ -264,17 +288,18 @@ namespace qe {
             for (unsigned i = 0; i < vs.size(); ++i) {
                 level.merge(m_rvar2level[vs[i]]);
             }
-            set_level(l, level);
+            set_level(l.var(), level);
             return level;
         }
 
-        void set_level(nlsat::literal l, max_level const& level) {
+        void set_level(nlsat::bool_var v, max_level const& level) {
             unsigned k = level.max();
             while (m_preds.size() <= k) {
                 m_preds.push_back(nlsat::scoped_literal_vector(m_solver));
             }
+            nlsat::literal l(v, false);
             m_preds[k].push_back(l);
-            m_bvar2level.insert(l.var(), level);            
+            m_bvar2level.insert(v, level);            
             TRACE("qe", m_solver.display(tout, l); tout << ": " << level << "\n";);
         }
         
@@ -290,10 +315,12 @@ namespace qe {
             }
             SASSERT(level() >= 2);
             unsigned num_scopes;
-            nlsat::scoped_literal_vector clause(m_solver);
-            mbp(level()-1, clause);            
+            clause cl(m_solver);
+            mbp(level()-1, cl);            
             
-            max_level clevel = mk_clause(clause.size(), clause.c_ptr());
+            max_level clevel = get_level(cl);
+            enforce_parity(cl);
+            add_clause(cl);
 
             if (clevel.max() == UINT_MAX) {
                 num_scopes = 2*(level()/2);
@@ -313,18 +340,23 @@ namespace qe {
 
         void project_qe() {
             SASSERT(level() >= 1 && m_mode == elim_t && m_valid_model);
-            nlsat::scoped_literal_vector clause(m_solver);
-            mbp(std::max(1u, level()-1), clause);            
+            clause cl(m_solver);
+            mbp(std::max(1u, level()-1), cl);            
             
-            expr_ref fml(m);
-            clause2fml(clause, fml);
+            expr_ref fml = clause2fml(cl);
             TRACE("qe", tout << level() << ": " << fml << "\n";);
-            if (level() == 1) {
+            max_level clevel = get_level(cl);
+            if (level() == 1 || clevel.max() == 0) {
+                add_assumption_literal(cl, fml);           
+            }
+            else {
+                enforce_parity(cl);
+            }
+            add_clause(cl);
+
+            if (level() == 1) { // is_forall() && clevel.max() == 0
                 add_to_answer(fml);
             }
-
-            add_assumption_literal(clause, fml);            
-            mk_clause(clause.size(), clause.c_ptr());                            
 
             if (level() == 1) {
                 pop(1);
@@ -346,33 +378,40 @@ namespace qe {
             m_answer.push_back(fml);
         }
 
-        void clause2fml(nlsat::scoped_literal_vector const& clause, expr_ref& fml) {
+        expr_ref clause2fml(nlsat::scoped_literal_vector const& clause) {
             expr_ref_vector fmls(m);
+            expr_ref fml(m);
             expr* t;
             nlsat2goal n2g(m);
             for (unsigned i = 0; i < clause.size(); ++i) {
                 nlsat::literal l = clause[i];
                 if (m_asm2fml.find(l.var(), t)) {
+                    fml = t;
+                    if (l.sign()) {
+                        fml = push_not(fml);
+                    }
                     SASSERT(l.sign());
-                    fmls.push_back(l.sign()?m.mk_not(t):t);
+                    fmls.push_back(fml);
                 }
                 else {
                     fmls.push_back(n2g(m_solver, m_b2a, m_x2t, l));
                 }
             }
             fml = mk_or(fmls);
+            return fml;
         }
 
-        void add_assumption_literal(nlsat::scoped_literal_vector& clause, expr* fml) {
+        void add_assumption_literal(clause& clause, expr* fml) {
             nlsat::bool_var b = m_solver.mk_bool_var();
             clause.push_back(nlsat::literal(b, true));
-            m_assumptions.push_back(nlsat::literal(b, false));
+            m_assumptions.push_back(nlsat::literal(b, false)); 
             m_asm2fml.insert(b, fml);
             m_trail.push_back(fml);            
             m_bvar2level.insert(b, max_level());
         }
 
         bool is_exists() const { return is_exists(level()); }
+        bool is_forall() const { return is_forall(level()); }
         bool is_exists(unsigned level) const { return (level % 2) == 0; }        
         bool is_forall(unsigned level) const { return is_exists(level+1); }
 
@@ -499,7 +538,7 @@ namespace qe {
                         SASSERT(m.is_bool(v));
                         nlsat::bool_var b = m_a2b.to_var(v);
                         m_bound_bvars.back().push_back(b);
-                        set_level(nlsat::literal(b, false), lvl);
+                        set_level(b, lvl);
                     }
                     else if (m_t2x.is_var(v)) {
                         nlsat::var w = m_t2x.to_var(v);
@@ -608,6 +647,7 @@ namespace qe {
             m_answer_simplify(m),
             m_trail(m)
         {
+            m_solver.get_explain().set_signed_project(true);
             m_nftactic = mk_tseitin_cnf_tactic(m);
         }
 
@@ -615,7 +655,9 @@ namespace qe {
         }
 
         void updt_params(params_ref const & p) {
-            m_solver.updt_params(p);
+            params_ref p2(p);
+            p2.set_bool("factor", false);
+            m_solver.updt_params(p2);
         }
         
         void collect_param_descrs(param_descrs & r) {
@@ -704,24 +746,56 @@ namespace qe {
             m_cancel = f;
         }
 
-        lbool interpolate(expr* a, expr* b, app_ref_vector const& vars, expr_ref& result) {
+        /**
+         
+           Algorithm:
+           I := true
+           while there is M, such that M |= ~B & I:
+              find P, such that M => P => exists y . ~B & I
+              ; forall y B => ~P
+              C := core of P with respect to A
+              ; A => ~ C => ~ P 
+              I := I & ~C
+
+
+           Alternative Algorithm: 
+           R := false
+           while there is M, such that M |= A & ~R:
+              find I, such that M => I => forall y . B
+              R := R | I              
+              
+         */
+
+        lbool interpolate(expr* a, expr* b, expr_ref& result) {
             SASSERT(m_mode == interp_t);
             
             reset();
             app_ref enableA(m), enableB(m);
             expr_ref A(m), B(m), fml(m);
-            expr_ref_vector fmls(m);
+            expr_ref_vector fmls(m), answer(m);
+
+            // varsB are private to B.
+            nlsat::var_vector vars;
+            uint_set fvars;
+            private_vars(a, b, vars, fvars);
             
             enableA = m.mk_const(symbol("#A"), m.mk_bool_sort());
-            enableB = m.mk_const(symbol("#B"), m.mk_bool_sort());
-            A = m.mk_implies(enableA, m.mk_not(a));
+            enableB = m.mk_not(enableA);
+            A = m.mk_implies(enableA, a);
             B = m.mk_implies(enableB, m.mk_not(b));
             fml = m.mk_and(A, B);
             hoist(fml);
 
+            
+
+            nlsat::literal _enableB = nlsat::literal(m_a2b.to_var(enableB), false);
+            nlsat::literal _enableA = ~_enableB;
+
             while (true) {
                 m_mode = qsat_t;
                 // enable B
+                m_assumptions.reset();
+                m_assumptions.push_back(_enableB);
                 lbool is_sat = check_sat();
 
                 switch (is_sat) {
@@ -730,20 +804,111 @@ namespace qe {
                 case l_true:                    
                     break;
                 case l_false:
-                    result = mk_and(m_answer);
+                    result = mk_and(answer);
                     return l_true;
                 }
 
-                NOT_IMPLEMENTED_YET();
                 // disable B, enable A
-
-                m_mode = elim_t;
-                // enforce the model of not B.
-                // compute one clause that rules out this model.
-
-                // disable A
+                m_assumptions.reset();
+                m_assumptions.push_back(_enableA);
                 // add blocking clause to solver.
+
+                nlsat::scoped_literal_vector core(m_solver);
+                
+                m_mode = elim_t;
+
+                mbp(vars, fvars, core);
+
+                // minimize core.
+                nlsat::literal_vector _core(core.size(), core.c_ptr());
+                _core.push_back(_enableA);
+                is_sat = m_solver.check(_core); // TBD: only for quantifier-free A. Generalize output of elim_t to be a core.
+                switch (is_sat) {
+                case l_undef: 
+                    return l_undef;
+                case l_true:
+                    UNREACHABLE();
+                case l_false:
+                    core.reset();
+                    core.append(_core.size(), _core.c_ptr());
+                    break;
+                }
+                negate_clause(core);
+                // keep polarity of enableA, such that clause is only 
+                // used when checking satisfiability of B.
+                for (unsigned i = 0; i < core.size(); ++i) {
+                    if (core[i].var() == _enableA.var()) core.set(i, ~core[i]);
+                }
+                add_clause(core);                   // Invariant is added as assumption for B.
+                answer.push_back(clause2fml(core)); // TBD: remove answer literal.
             }
+        }
+
+        /**
+           \brief extract variables that are private to a (not used in b).
+           vars cover the real variables, and fvars cover the Boolean variables.
+
+           TBD: We want fvars to be the complement such that returned core contains
+                Shared boolean variables, but not the ones private to B.
+         */
+        void private_vars(expr* a, expr* b, nlsat::var_vector& vars, uint_set& fvars) {
+            app_ref_vector varsA(m), varsB(m);
+            obj_hashtable<expr> varsAS;
+            pred_abs abs(m);
+            abs.get_free_vars(a, varsA);
+            abs.get_free_vars(b, varsB);
+            insert_set(varsAS, varsA);
+            for (unsigned i = 0; i < varsB.size(); ++i) {
+                if (varsAS.contains(varsB[i].get())) {
+                    varsB[i] = varsB.back();
+                    varsB.pop_back();
+                    --i;
+                }
+            }
+            for (unsigned j = 0; j < varsB.size(); ++j) {
+                app* v = varsB[j].get();
+                if (m_a2b.is_var(v)) {
+                    fvars.insert(m_a2b.to_var(v));
+                }
+                else if (m_t2x.is_var(v)) {
+                    vars.push_back(m_t2x.to_var(v));                    
+                }
+            }
+        }
+
+        lbool maximize(app* _x, expr* _fml, scoped_anum& result, bool& unbounded) {
+            expr_ref fml(_fml, m);
+            reset();
+            hoist(fml);
+            nlsat::literal_vector lits;
+            lbool is_sat = l_true;
+            nlsat::var x = m_t2x.to_var(_x);  
+            m_mode = qsat_t;
+            while (is_sat == l_true) {
+                is_sat = check_sat();
+                if (is_sat == l_true) {
+                    // m_asms is minimized set of literals that satisfy formula.
+                    nlsat::explain& ex = m_solver.get_explain();
+                    polynomial::manager& pm = m_solver.pm();
+                    anum_manager& am = m_solver.am();
+                    ex.maximize(x, m_asms.size(), m_asms.c_ptr(), result, unbounded);
+                    if (unbounded) {
+                        break;
+                    }
+                    // TBD: assert the new bound on x using the result.
+                    bool is_even = false;
+                    polynomial::polynomial_ref pr(pm);
+                    pr = pm.mk_polynomial(x);
+                    rational r;
+                    am.get_upper(result, r);
+                    // result is algebraic numeral, but polynomials are not defined over extension field.
+                    polynomial::polynomial* p = pr;
+                    nlsat::bool_var b = m_solver.mk_ineq_atom(nlsat::atom::GT, 1, &p, &is_even);
+                    nlsat::literal bound(b, false);
+                    m_solver.mk_clause(1, &bound);
+                }
+            }
+            return is_sat;
         }
         
     };

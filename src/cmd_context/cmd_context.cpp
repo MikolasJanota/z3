@@ -384,6 +384,9 @@ void cmd_context::global_params_updated() {
             p.set_bool("auto_config", false);
         m_solver->updt_params(p);
     }
+    if (m_opt) {
+        get_opt()->updt_params(gparams::get_module("opt"));
+    }
 }
 
 void cmd_context::set_produce_models(bool f) {
@@ -508,6 +511,8 @@ bool cmd_context::logic_has_arith_core(symbol const & s) const {
         s == "QF_AUFLIRA" ||
         s == "QF_AUFNIA" ||
         s == "QF_AUFNIRA" ||
+        s == "QF_ANIA" ||
+        s == "QF_LIRA" ||
         s == "QF_UFLIA" ||
         s == "QF_UFLRA" ||
         s == "QF_UFIDL" ||
@@ -519,6 +524,7 @@ bool cmd_context::logic_has_arith_core(symbol const & s) const {
         s == "QF_UFNIA" ||
         s == "QF_UFNIRA" ||
         s == "QF_BVRE" ||
+        s == "ALIA" ||
         s == "AUFLIA" ||
         s == "AUFLIRA" ||
         s == "AUFNIA" ||
@@ -527,9 +533,12 @@ bool cmd_context::logic_has_arith_core(symbol const & s) const {
         s == "UFLRA" ||
         s == "UFNRA" ||
         s == "UFNIRA" ||
+        s == "NIA" ||
+        s == "NRA" ||
         s == "UFNIA" ||
         s == "LIA" ||
         s == "LRA" ||
+        s == "UFIDL" ||
         s == "QF_FP" ||
         s == "QF_FPBV" ||
         s == "QF_BVFP" ||
@@ -584,10 +593,12 @@ bool cmd_context::logic_has_array_core(symbol const & s) const {
     return
         s == "QF_AX" ||
         s == "QF_AUFLIA" ||
+        s == "QF_ANIA" ||
         s == "QF_ALIA" ||
         s == "QF_AUFLIRA" ||
         s == "QF_AUFNIA" ||
         s == "QF_AUFNIRA" ||
+        s == "ALIA" ||
         s == "AUFLIA" ||
         s == "AUFLIRA" ||
         s == "AUFNIA" ||
@@ -1423,9 +1434,10 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
     unsigned rlimit  = m_params.m_rlimit;
     scoped_watch sw(*this);
     lbool r;
+    bool was_pareto = false, was_opt = false;
 
     if (m_opt && !m_opt->empty()) {
-        bool was_pareto = false;
+        was_opt = true;
         m_check_sat_result = get_opt();
         cancel_eh<opt_wrapper> eh(*get_opt());
         scoped_ctrl_c ctrlc(eh);
@@ -1458,9 +1470,6 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
             r = l_true;
         }
         get_opt()->set_status(r);
-        if (r != l_false && !was_pareto) {
-            get_opt()->display_assignment(regular_stream());
-        }
     }
     else if (m_solver) {
         m_check_sat_result = m_solver.get(); // solver itself stores the result.
@@ -1487,6 +1496,10 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
     }
     display_sat_result(r);
     validate_check_sat_result(r);
+    if (was_opt && r != l_false && !was_pareto) {
+        get_opt()->display_assignment(regular_stream());
+    }
+
     if (r == l_true) {
         validate_model();
         if (m_params.m_dump_models) {
