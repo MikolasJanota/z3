@@ -39,6 +39,53 @@ Revision History:
 ///////////////
 #include"model_smt2_pp.h"
 
+#include"array_decl_plugin.h"
+#include"simplifier_plugin.h"
+#include"basic_simplifier_plugin.h"
+#include"array_simplifier_params.h"
+#include"array_simplifier_plugin.h"
+#include"bv_simplifier_plugin.h"
+#include"bool_rewriter.h"
+
+struct simp_wrap {
+    inline void operator() (expr * s, expr_ref & r) {
+        proof_ref dummy(m);
+        simp(s, r, dummy);
+    }
+    simp_wrap(ast_manager& m)
+        : m(m)
+        , simp(m)
+        , bsp(m)
+        , bvsp(m, bsp, bv_par)
+        , asp(m, bsp, simp, ar_par)
+    {
+        params_ref p;
+        p.set_bool("local_ctx", true);
+        p.set_uint("local_ctx_limit", 10000000);
+        p.set_bool("ite_extra_rules", true);
+        bsp.get_rewriter().updt_params(p);
+
+        simp.register_plugin(&bsp);
+        simp.register_plugin(&bvsp);
+        //simp.register_plugin(&asp);
+        //simp.enable_ac_support(true);
+    }
+
+    ~simp_wrap() {
+        simp.release_plugins();
+    }
+
+    ast_manager& m;
+    simplifier simp;
+    basic_simplifier_plugin bsp;
+    bv_simplifier_params bv_par;
+    bv_simplifier_plugin bvsp;
+    array_simplifier_params ar_par;
+    array_simplifier_plugin asp;
+};
+
+
+
 class lackr_tactic : public tactic {
 public:
     lackr_tactic(ast_manager& m, params_ref const& p)
@@ -65,7 +112,7 @@ public:
         goal_ref resg(alloc(goal, *g, true));
         if (o == l_false) resg->assert_expr(m.mk_false());
         if (o != l_undef) result.push_back(resg.get());
-        // report model
+        // Report model
         if (g->models_enabled() && (o == l_true)) {
             model_ref abstr_model = i.get_model();
             mc = mk_lackr_model_converter(m, i.get_info(), abstr_model);
@@ -79,19 +126,33 @@ public:
 private:
     struct imp {
       public:
-        imp(ast_manager& m, params_ref p, expr_ref f)
+        imp(ast_manager& m, params_ref p, expr_ref _f)
           : m(m)
           , p(p)
-          , f(f)
+          , f(m)
           , a(m)
           , sat(0)
           , bu(m)
           , au(m)
           , simp(m)
           , ackrs(m)
-        {}
+        {
+            simp_wrap _s(m);
+            _s(_f, f);     
+            //f = _f;
+        }
 
         lbool operator() () {
+            if(0) {
+                tactic_ref t = mk_qfaufbv_tactic(m, p);
+                scoped_ptr<solver> sol = mk_tactic2solver(m, t.get(), p);
+                sol->assert_expr(f);
+                std::cerr << "; begin\n";
+                sol->display(std::cerr);
+                std::cerr << "; end\n";
+                //return l_undef;
+            }
+
             if(1){
                 std::cout << "c qfbv sat\n";
                 //std::cout << "c inc sat\n";
@@ -147,9 +208,10 @@ private:
         model_ref m_model;
 
         bool init() {
-            params_ref simp_p;
-            //simp_p.set_bool("pull_cheap_ite", true);
-            simp.updt_params(p);
+            params_ref simp_p(p);
+//            simp_p.set_bool("pull_cheap_ite", true);
+ //           simp_p.set_bool("ite_extra_rules", true);
+            simp.updt_params(simp_p);
             info = alloc(ackr_info, m);
             bool iok = get_terms() && abstract() && ackr();
             if (!iok) return false;
@@ -315,6 +377,7 @@ private:
 };
 
 tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
+    //return and_then(mk_nnf_tactic(m, p), alloc(lackr_tactic, m, p));
     //return alloc(lackr_tactic, m, p);
     //params_ref main_p;
     //main_p.set_bool("elim_and", true);
@@ -323,27 +386,34 @@ tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
     //main_p.set_bool("expand_store_eq", true);
 
     params_ref simp2_p = p;
-    simp2_p.set_bool("som", true);
-    simp2_p.set_bool("pull_cheap_ite", true);
+    simp2_p.set_bool("som", false);
+    simp2_p.set_bool("pull_cheap_ite", false);
     simp2_p.set_bool("push_ite_bv", false);
+    simp2_p.set_bool("push_ite_arith", false);
     simp2_p.set_bool("local_ctx", true);
+    //simp2_p.set_bool("flat", false);
     simp2_p.set_uint("local_ctx_limit", 10000000);
+
+
+    simp2_p.set_bool("ite_extra_rules", true);
+    //simp2_p.set_bool("blast_eq_value", true);
+    //simp2_p.set_bool("bv_sort_ac", true);
 
     params_ref ctx_simp_p;
     ctx_simp_p.set_uint("max_depth", 32);
     ctx_simp_p.set_uint("max_steps", 5000000);
 
     tactic * const preamble_t = and_then(
-        mk_simplify_tactic(m),
+      // mk_simplify_tactic(m),
         mk_propagate_values_tactic(m),
         //using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
-        if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
-        using_params(mk_simplify_tactic(m), simp2_p),
+        if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),       
         mk_max_bv_sharing_tactic(m),
-        mk_macro_finder_tactic(m, p),
-        mk_nnf_tactic(m, p)
+        mk_macro_finder_tactic(m, p)
+        //using_params(mk_simplify_tactic(m), simp2_p)
+        //mk_nnf_tactic(m, p)
         );
 
     return and_then(
