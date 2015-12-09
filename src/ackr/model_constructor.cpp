@@ -36,9 +36,12 @@ struct model_constructor::imp {
         {}
 
         ~imp() {
-            values2val_t::iterator i = m_values2val.begin();
+            {values2val_t::iterator i = m_values2val.begin();
             const values2val_t::iterator e = m_values2val.end();
-            for (; i != e; ++i) m_m.dec_ref(i->m_key);
+            for (; i != e; ++i) m_m.dec_ref(i->m_key);}
+            {app2val_t::iterator i = m_app2val.begin();
+            const app2val_t::iterator e = m_app2val.end();
+            for (; i != e; ++i) m_m.dec_ref(i->m_value); }
         }
 
         //
@@ -113,6 +116,11 @@ struct model_constructor::imp {
             return true;
         }
 
+        inline bool is_val(expr * e) {
+            if (!is_app(e)) return false;
+            return is_val(to_app(e));
+        }
+
         inline bool is_val(app * a) {
             const family_id fid = a->get_decl()->get_family_id();
             const bool rv = fid != null_family_id && a->get_num_args() == 0;
@@ -131,13 +139,14 @@ struct model_constructor::imp {
         bool mk_value(app * const a) {
             if (is_val(a)) return true; // skip numerals
             TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
-            SASSERT(!m_values2val.contains(a));            
+            SASSERT(!m_app2val.contains(a));            
             const unsigned num = a->get_num_args();
             expr_ref result(m_m);
 
             if (num == 0) { // handle constants
                 make_value_constant(a, result);
                 m_app2val.insert(a, result.get());
+                m_m.inc_ref(result.get());
                 TRACE("model_constructor",
                     tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
                     << mk_ismt2_pp(result.get(), m_m, 2)
@@ -151,28 +160,34 @@ struct model_constructor::imp {
             for (unsigned i = 0; i < num; ++i) {
                 expr * val;
                 const bool b = eval(to_app(args[i]), val); // TODO: OK conversion to_app?
-                TRACE("model_constructor", if (!b) tout << "arg val(\n" << mk_ismt2_pp(args[i], m_m, 2); );
+                CTRACE("model_constructor", !b, tout << "fail arg val(\n" << mk_ismt2_pp(args[i], m_m, 2); );
+                TRACE("model_constructor", tout << 
+                    "arg val "<< i << "(\n" << mk_ismt2_pp(args[i], m_m, 2)
+                    << " : " << mk_ismt2_pp(args[i], m_m, 2) << '\n'; );
                 SASSERT(b);
                 values[i] = val;                
             }
             // handle functions
-            app * const key = m_m.mk_app(a->get_decl(), values.c_ptr());
-            m_m.inc_ref(key);
             if (a->get_family_id() == null_family_id) { // handle uninterpreted
+                app * const key = m_m.mk_app(a->get_decl(), values.c_ptr());
+                m_m.inc_ref(key);
                 if (!make_value_uninterpreted_function(a, values, key, result))
                     return false;
                 m_values2val.insert(key, mk_val_info(result.get(), a));
             }
             else { // handle interpreted
-                make_value_interpreted_function(a, values, result);
+                make_value_interpreted_function(a, values, result);                
             }
-            TRACE("model_constructor",
-                tout << "map vals(\n" << mk_ismt2_pp(key, m_m, 2) << "\n->"
-                << mk_ismt2_pp(result.get(), m_m, 2) << ")\n"; );
             TRACE("model_constructor",
                 tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
                 << mk_ismt2_pp(result.get(), m_m, 2)<< ")\n"; );
+            CTRACE("model_constructor",
+                !is_val(result.get()),
+                tout << "eval fail\n" << mk_ismt2_pp(a, m_m, 2) << mk_ismt2_pp(result, m_m, 2) << "\n";
+            );
+            SASSERT(is_val(result.get()));
             m_app2val.insert(a, result.get()); // memoize
+            m_m.inc_ref(result.get());
             return true;
         }
 
@@ -241,10 +256,8 @@ struct model_constructor::imp {
                     br_status st = BR_FAILED;
                     if (s_fid == m_bv_rw.get_fid())
                         st = m_bv_rw.mk_eq_core(values.get(0), values.get(1), result);
-                    SASSERT(st != BR_FAILED);
                 } else {
                     br_status st = m_b_rw.mk_app_core(fd, num, values.c_ptr(), result);
-                    SASSERT(st != BR_FAILED);
                 }
             } else {
                 br_status st = BR_FAILED;
@@ -252,7 +265,6 @@ struct model_constructor::imp {
                     st = m_bv_rw.mk_app_core(fd, num, values.c_ptr(), result);
                 else
                     UNREACHABLE();
-                SASSERT(st != BR_FAILED);
             }
         }
 };

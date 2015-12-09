@@ -7,7 +7,6 @@ lackr_tactic.cpp
 
 Abstract:
 
-
 Author:
 
 Mikolas Janota
@@ -86,7 +85,6 @@ struct simp_wrap {
 };
 
 
-
 class lackr_tactic : public tactic {
 public:
     lackr_tactic(ast_manager& m, params_ref const& p)
@@ -145,6 +143,23 @@ private:
             //f = _f;
         }
 
+        void setup_sat() {
+            if (1) {
+                std::cout << "c qfbv sat\n";
+                //std::cout << "c inc sat\n";
+                //sat = mk_inc_sat_solver(m, p);
+                tactic_ref t = mk_qfbv_tactic(m, p);
+                sat = mk_tactic2solver(m, t.get(), p);
+            }
+            else {
+                std::cout << "c smt sat\n";
+                tactic_ref t = mk_qfaufbv_tactic(m, p);
+                sat = mk_tactic2solver(m, t.get(), p);
+            }
+            SASSERT(sat);
+            sat->set_produce_models(true);
+        }
+
         lbool operator() () {
             if(0) {
                 tactic_ref t = mk_qfaufbv_tactic(m, p);
@@ -155,26 +170,13 @@ private:
                 std::cerr << "; end\n";
                 //return l_undef;
             }
-
-            if(1){
-                std::cout << "c qfbv sat\n";
-                //std::cout << "c inc sat\n";
-                //sat = mk_inc_sat_solver(m, p);
-                tactic_ref t = mk_qfbv_tactic(m, p);
-                sat = mk_tactic2solver(m, t.get(), p);
-            } else {
-                std::cout << "c smt sat\n";
-                tactic_ref t = mk_qfaufbv_tactic(m, p);
-                sat = mk_tactic2solver(m, t.get(), p);
-            }
-            SASSERT(sat);
-            sat->set_produce_models(true);
+            setup_sat();
             const bool ok = init();
             if (!ok) return l_undef;
             TRACE("lackr", tout << "sat goal\n"; sat->display(tout););
             //std::cout << "sat goal\n"; sat->display(std::cout);
             TRACE("lackr", tout << "run sat\n"; );
-            const lbool rv = sat->check_sat(0, 0);
+            const lbool rv = 0 ? eager() : lazy();
             if (rv == l_true) sat->get_model(m_model);
             //if (rv == l_true) {
             //    model_constructor mc(m, info);
@@ -188,6 +190,43 @@ private:
             );
             return rv;
           }
+
+        lbool eager() {
+            if (!eager_enc()) return l_undef;
+            ackrs.push_back(a);
+            expr_ref all(m);
+            all = m.mk_and(ackrs.size(), ackrs.c_ptr());
+            simp(all);
+            sat->assert_expr(all);
+            return sat->check_sat(0, 0);
+        }
+
+
+        lbool lazy() {
+            model_constructor mc(m, info);
+            sat->assert_expr(a);
+            unsigned ackr_head = 0;
+            while (1) {
+                const lbool r = sat->check_sat(0, 0);
+                if (r == l_undef) return l_undef; // give up
+                if (r == l_false) return l_false; // abstraction unsat
+                // reconstruct model
+                model_ref am;
+                sat->get_model(am);
+                const bool mc_res = mc.check(am);
+                if (mc_res) return l_true; // model okay
+                // refine abstraction
+                const vector<model_constructor::app_pair>& conflicts = mc.get_conflicts();
+                for (vector<model_constructor::app_pair>::const_iterator i = conflicts.begin();
+                     i != conflicts.end(); ++i) {
+                    ackr(i->first, i->second);
+                }
+                while (ackr_head < ackrs.size()) {
+                    sat->assert_expr(ackrs.get(ackr_head++));
+                }
+            }            
+        }
+
 
         ~imp() {
             const f2tt::iterator e = f2t.end();
@@ -220,13 +259,8 @@ private:
  //           simp_p.set_bool("ite_extra_rules", true);
             simp.updt_params(simp_p);
             info = alloc(ackr_info, m);
-            bool iok = collect_terms() && abstract() && eager_ackr();
+            bool iok = collect_terms() && abstract();
             if (!iok) return false;
-            ackrs.push_back(a);
-            expr_ref all(m);
-            all = m.mk_and(ackrs.size(), ackrs.c_ptr());
-            simp(all);
-            sat->assert_expr(all);
             return true;
         }
 
@@ -276,7 +310,7 @@ private:
         //
         // Introduce the ackermann lemma for each pair of terms.
         //
-        bool eager_ackr() {
+        bool eager_enc() {
             const f2tt::iterator e = f2t.end();
             for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
                 func_decl* const fd = i->m_key;
@@ -325,7 +359,6 @@ private:
             TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(a.get(), m, 2) << ")\n";);
             return true;
         }
-
 
         void add_term(app* a) {
             //TRACE("lackr", tout << "inspecting term(\n" << mk_ismt2_pp(a, m, 2) << ")\n";);

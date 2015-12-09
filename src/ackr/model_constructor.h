@@ -26,14 +26,14 @@ class model_constructor {
         model_constructor(ast_manager& m, ackr_info_ref info);
         bool check(model_ref& abstr_model);
         const vector<app_pair>& get_conflicts() {
-            SASSERT(class_state == CONFLICT);
+            SASSERT(state == CONFLICT);
             return conflicts;
         }
     private:
         struct imp;
-        enum {CHECKED, CONFLICT, UNKNOWN} state;
-        vector<std::pair<app*,app*>> conflicts;
-        ast_manager& m;
-        const ackr_info& info;
+        enum {CHECKED, CONFLICT, UNKNOWN}  state;
+        vector<std::pair<app*,app*>>       conflicts;
+        ast_manager&                       m;
+        const ackr_info_ref                info;
 };
 #endif /* MODEL_CONSTRUCTOR_H_626 */
