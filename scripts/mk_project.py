@@ -51,7 +51,6 @@ def init_project_def():
     add_lib('proto_model', ['model', 'simplifier', 'smt_params'], 'smt/proto_model')
     add_lib('smt', ['bit_blaster', 'macros', 'normal_forms', 'cmd_context', 'proto_model',
                     'substitution', 'grobner', 'euclid', 'simplex', 'proof_checker', 'pattern', 'parser_util', 'fpa'])
-    add_lib('user_plugin', ['smt'], 'smt/user_plugin')
     add_lib('bv_tactics', ['tactic', 'bit_blaster'], 'tactic/bv')
     add_lib('fuzzing', ['ast'], 'test/fuzzing')
     add_lib('smt_tactic', ['smt'], 'smt/tactic')
@@ -80,7 +79,7 @@ def init_project_def():
     add_lib('q2_tactic', ['smt', 'smtlogic_tactics', 'sat_solver', 'ufbv_tactic'], 'q2_tactic')
     add_lib('ackr', ['smt', 'smtlogic_tactics', 'sls_tactic', 'sat_solver', 'ufbv_tactic'], 'ackr')
     API_files = ['z3_api.h', 'z3_algebraic.h', 'z3_polynomial.h', 'z3_rcf.h', 'z3_interp.h', 'z3_fpa.h']
-    add_lib('api', ['portfolio', 'user_plugin', 'smtparser', 'realclosure', 'interp', 'opt'],
+    add_lib('api', ['portfolio', 'smtparser', 'realclosure', 'interp', 'opt'],
             includes2install=['z3.h', 'z3_v1.h', 'z3_macros.h'] + API_files)
     add_exe('shell', ['api', 'sat', 'extra_cmds','opt', 'q2_tactic', 'ackr'], exe_name='z3')
     add_exe('test', ['api', 'fuzzing', 'simplex'], exe_name='test-z3', install=False)
@@ -96,7 +95,6 @@ def init_project_def():
     set_z3py_dir('api/python')
     # Examples
     add_cpp_example('cpp_example', 'c++') 
-    add_cpp_example('iz3', 'interp') 
     add_cpp_example('z3_tptp', 'tptp') 
     add_c_example('c_example', 'c')
     add_c_example('maxsat')

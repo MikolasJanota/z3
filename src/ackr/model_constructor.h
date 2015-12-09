@@ -22,10 +22,11 @@
 #include"model.h"
 class model_constructor {
     public:
-        model_constructor(ast_manager& m, const ackr_info& info);
+        typedef std::pair<app *, app *>           app_pair;
+        model_constructor(ast_manager& m, ackr_info_ref info);
         bool check(model_ref& abstr_model);
-        vector<std::pair<app*, app*>>& get_conflicts() {
-            SASSERT(state==CONFLICT);
+        const vector<app_pair>& get_conflicts() {
+            SASSERT(class_state == CONFLICT);
             return conflicts;
         }
     private:
