@@ -129,14 +129,13 @@ struct model_constructor::imp {
         // Check and record the value for a given term, given that all arguments are already checked.
         //
         bool mk_value(app * const a) {
-            if (is_val(a)) return true;
+            if (is_val(a)) return true; // skip numerals
             TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
-            SASSERT(!m_values2val.contains(a));
-            family_id fid = a->get_family_id();
+            SASSERT(!m_values2val.contains(a));            
             const unsigned num = a->get_num_args();
             expr_ref result(m_m);
 
-            if (num == 0) { //  handle constants
+            if (num == 0) { // handle constants
                 make_value_constant(a, result);
                 m_app2val.insert(a, result.get());
                 TRACE("model_constructor",
@@ -145,39 +144,37 @@ struct model_constructor::imp {
                     << ")\n"; );
                 return true;
             }
+            // evaluate arguments
             expr_ref_vector values(m_m);
             values.reserve(num);
-            expr * const * args = a->get_args();
-            for (unsigned i = 0; i < num; ++i) { // evaluate arguments
+            expr * const * args = a->get_args();            
+            for (unsigned i = 0; i < num; ++i) {
                 expr * val;
-                const bool b = eval(to_app(args[i]), val); // TODO: OK conversion?
+                const bool b = eval(to_app(args[i]), val); // TODO: OK conversion to_app?
                 TRACE("model_constructor", if (!b) tout << "arg val(\n" << mk_ismt2_pp(args[i], m_m, 2); );
                 SASSERT(b);
                 values[i] = val;                
             }
+            // handle functions
             app * const key = m_m.mk_app(a->get_decl(), values.c_ptr());
             m_m.inc_ref(key);
-            if (fid = null_family_id) { // handle uninterpreted
+            if (a->get_family_id() == null_family_id) { // handle uninterpreted
                 if (!make_value_uninterpreted_function(a, values, key, result))
                     return false;
                 m_values2val.insert(key, mk_val_info(result.get(), a));
             }
-            else {// handle interpreted
+            else { // handle interpreted
                 make_value_interpreted_function(a, values, result);
             }
             TRACE("model_constructor",
                 tout << "map vals(\n" << mk_ismt2_pp(key, m_m, 2) << "\n->"
-                << mk_ismt2_pp(result.get(), m_m, 2)
-                << ")\n"; );
+                << mk_ismt2_pp(result.get(), m_m, 2) << ")\n"; );
             TRACE("model_constructor",
                 tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
-                << mk_ismt2_pp(result.get(), m_m, 2)
-                << ")\n"; );
-            
-            m_app2val.insert(a, result.get());
+                << mk_ismt2_pp(result.get(), m_m, 2)<< ")\n"; );            
+            m_app2val.insert(a, result.get()); // memoize
             return true;
         }
-
 
         // Constants from the abstract model are directly mapped to the concrete one.
         void make_value_constant(app * const a, expr_ref& result) {
@@ -195,30 +192,31 @@ struct model_constructor::imp {
                 expr_ref_vector& values,
                 app* key,
                 expr_ref& result) {
-            app * const ac = m_info->get_abstr(a); // get ackermann constant
+            // get ackermann constant
+            app * const ac = m_info->get_abstr(a);
             func_decl * const a_fd = a->get_decl();
             SASSERT(ac->get_num_args() == 0);
             SASSERT(a_fd->get_range() == ac->get_decl()->get_range());
             expr * value = m_abstr_model->get_const_interp(ac->get_decl());
+            // get ackermann constant's interpretation
             if (value == 0) { // TODO: avoid model completetion?
                 sort * s = a_fd->get_range();
                 value = m_abstr_model->get_some_value(s);
             }
+            // check congruence
             val_info vi;
-            if(m_values2val.find(key,vi)) {// already is mapped to a value
+            if(m_values2val.find(key,vi)) { // already is mapped to a value
                 SASSERT(vi.source_term);
                 const bool ok =  vi.value == value;
                 if (!ok) {
                     TRACE("model_constructor",
                         tout << "already mapped by(\n" << mk_ismt2_pp(vi.source_term, m_m, 2) << "\n->"
-                        << mk_ismt2_pp(vi.value, m_m, 2)
-                        << ")\n"; );
-
+                             << mk_ismt2_pp(vi.value, m_m, 2) << ")\n"; );
                     m_conflicts.push_back(std::make_pair(a, vi.source_term));
                 }
                 result = vi.value;
                 return ok;
-            } else {
+            } else {                        // new value
                 result = value;
                 vi.value = value;
                 vi.source_term = a;
@@ -260,7 +258,7 @@ struct model_constructor::imp {
 };
 
 model_constructor::model_constructor(ast_manager& m, ackr_info_ref info)
-    :m(m)
+    : m(m)
     , class_state(UNKNOWN)
     , info(info)
 {}
