@@ -170,7 +170,7 @@ struct model_constructor::imp {
                 if(!ok) m_conflicts.push_back(std::make_pair(a,vi.source_term));
                 result = vi.value;
                 return ok;
-            } else {
+            } else {// record value from abstraction
                 result = vi.value;
                 vi.value = value;
                 vi.source_term = a;
@@ -213,13 +213,14 @@ struct model_constructor::imp {
 
 model_constructor::model_constructor(ast_manager& m, const ackr_info& info)
     :m(m)
-,  class_state(UNKNOWN)
+,  state(UNKNOWN)
 ,  info(info)
 {}
 
 bool model_constructor::check(model_ref& abstr_model) {
+    conflicts.reset();
     model_constructor::imp i(m, info, abstr_model, conflicts);
     const bool rv = i.check();
-    class_state = rv ? CHECKED : CONFLICT;
+    state = rv ? CHECKED : CONFLICT;
     return rv;
 }

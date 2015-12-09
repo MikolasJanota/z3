@@ -21,18 +21,16 @@
 #include"ackr_info.h"
 #include"model.h"
 class model_constructor {
-    private:
-        struct imp;
-        imp *  m_imp;
     public:
         model_constructor(ast_manager& m, const ackr_info& info);
         bool check(model_ref& abstr_model);
         vector<std::pair<app*, app*>>& get_conflicts() {
-            SASSERT(class_state==CONFLICT);
+            SASSERT(state==CONFLICT);
             return conflicts;
         }
     private:
-        enum {CHECKED, CONFLICT, UNKNOWN} class_state;
+        struct imp;
+        enum {CHECKED, CONFLICT, UNKNOWN} state;
         vector<std::pair<app*,app*>> conflicts;
         ast_manager& m;
         const ackr_info& info;
