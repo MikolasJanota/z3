@@ -207,6 +207,7 @@ private:
             sat->assert_expr(a);
             unsigned ackr_head = 0;
             while (1) {
+                TRACE("lackr", tout << "lazy check\n";);
                 const lbool r = sat->check_sat(0, 0);
                 if (r == l_undef) return l_undef; // give up
                 if (r == l_false) return l_false; // abstraction unsat
@@ -452,7 +453,7 @@ tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
     ctx_simp_p.set_uint("max_steps", 5000000);
 
     tactic * const preamble_t = and_then(
-      // mk_simplify_tactic(m),
+        mk_simplify_tactic(m),
         mk_propagate_values_tactic(m),
         //using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
         mk_solve_eqs_tactic(m),

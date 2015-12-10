@@ -33,15 +33,27 @@ struct model_constructor::imp {
             , m_conflicts(conflicts)
             , m_b_rw(m)
             , m_bv_rw(m)
+            , m_empty_model(m)
         {}
 
         ~imp() {
-            {values2val_t::iterator i = m_values2val.begin();
-            const values2val_t::iterator e = m_values2val.end();
-            for (; i != e; ++i) m_m.dec_ref(i->m_key);}
-            {app2val_t::iterator i = m_app2val.begin();
-            const app2val_t::iterator e = m_app2val.end();
-            for (; i != e; ++i) m_m.dec_ref(i->m_value); }
+            {
+                values2val_t::iterator i = m_values2val.begin();
+                const values2val_t::iterator e = m_values2val.end();
+                for (; i != e; ++i) {
+                    m_m.dec_ref(i->m_key);
+                    m_m.dec_ref(i->m_value.value);
+                    m_m.dec_ref(i->m_value.source_term);
+                }
+            }            
+            {
+                app2val_t::iterator i = m_app2val.begin();
+                const app2val_t::iterator e = m_app2val.end();
+                for (; i != e; ++i) {
+                    m_m.dec_ref(i->m_value);
+                    m_m.dec_ref(i->m_key);
+                }
+            }
         }
 
         //
@@ -63,6 +75,8 @@ struct model_constructor::imp {
         vector<std::pair<app*,app*>>&   m_conflicts;
         bool_rewriter                   m_b_rw;
         bv_rewriter                     m_bv_rw;
+        scoped_ptr<model_evaluator>     m_evaluator;
+        model                           m_empty_model;
     private:
         struct val_info { expr * value; app * source_term; };
         typedef obj_map<app, expr *> app2val_t;
@@ -83,6 +97,7 @@ struct model_constructor::imp {
         // (Currently stops upon the first failure).
         // Returns true if and only if congruence check succeeded.
         bool run() {
+            m_evaluator = alloc(model_evaluator, m_empty_model);
             expr_mark visited;
             expr *  curr;
             while (!m_stack.empty()) {
@@ -125,59 +140,60 @@ struct model_constructor::imp {
             const family_id fid = a->get_decl()->get_family_id();
             const bool rv = fid != null_family_id && a->get_num_args() == 0;
             SASSERT(rv == (m_bv_rw.is_numeral(a) || m_m.is_true(a) || m_m.is_false(a)));
+            TRACE("model_constructor", tout << "is_val " << mk_ismt2_pp(a, m_m, 2) << " : " << rv << ")\n";);
             return rv;
         }
 
-        inline bool eval(app * a, expr *& val) {
+        inline bool eval_cached(app * a, expr *& val) {
             if (is_val(a)) { val = a; return true; }
             return m_app2val.find(a, val);
         }
 
-        // 
-        // Check and record the value for a given term, given that all arguments are already checked.
-        //
-        bool mk_value(app * const a) {
-            if (is_val(a)) return true; // skip numerals
-            TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
-            SASSERT(!m_app2val.contains(a));            
+        bool evaluate(app * const a, expr_ref& result) {
+            SASSERT(!is_val(a));
             const unsigned num = a->get_num_args();
-            expr_ref result(m_m);
-
             if (num == 0) { // handle constants
                 make_value_constant(a, result);
-                m_app2val.insert(a, result.get());
-                m_m.inc_ref(result.get());
-                TRACE("model_constructor",
-                    tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
-                    << mk_ismt2_pp(result.get(), m_m, 2)
-                    << ")\n"; );
                 return true;
             }
             // evaluate arguments
             expr_ref_vector values(m_m);
             values.reserve(num);
-            expr * const * args = a->get_args();            
+            expr * const * args = a->get_args();
             for (unsigned i = 0; i < num; ++i) {
                 expr * val;
-                const bool b = eval(to_app(args[i]), val); // TODO: OK conversion to_app?
+                const bool b = eval_cached(to_app(args[i]), val); // TODO: OK conversion to_app?
                 CTRACE("model_constructor", !b, tout << "fail arg val(\n" << mk_ismt2_pp(args[i], m_m, 2); );
-                TRACE("model_constructor", tout << 
-                    "arg val "<< i << "(\n" << mk_ismt2_pp(args[i], m_m, 2)
-                    << " : " << mk_ismt2_pp(args[i], m_m, 2) << '\n'; );
+                TRACE("model_constructor", tout <<
+                    "arg val " << i << "(\n" << mk_ismt2_pp(args[i], m_m, 2)
+                    << " : " << mk_ismt2_pp(val, m_m, 2) << '\n'; );
                 SASSERT(b);
-                values[i] = val;                
+                values[i] = val;
             }
             // handle functions
             if (a->get_family_id() == null_family_id) { // handle uninterpreted
-                app * const key = m_m.mk_app(a->get_decl(), values.c_ptr());
-                m_m.inc_ref(key);
-                if (!make_value_uninterpreted_function(a, values, key, result))
+                app_ref key(m_m.mk_app(a->get_decl(), values.c_ptr()), m_m);
+                if (!make_value_uninterpreted_function(a, values, key.get(), result)) {
                     return false;
-                m_values2val.insert(key, mk_val_info(result.get(), a));
+                }
             }
             else { // handle interpreted
-                make_value_interpreted_function(a, values, result);                
+                make_value_interpreted_function(a, values, result);
             }
+            return true;
+        }
+
+        // 
+        // Check and record the value for a given term, given that all arguments are already checked.
+        //
+        bool mk_value(app * a) {
+            if (is_val(a)) return true; // skip numerals
+            TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
+            SASSERT(!m_app2val.contains(a));            
+            const unsigned num = a->get_num_args();
+            expr_ref result(m_m);            
+            if (!evaluate(a, result)) return false;
+            SASSERT(is_val(result));
             TRACE("model_constructor",
                 tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
                 << mk_ismt2_pp(result.get(), m_m, 2)<< ")\n"; );
@@ -187,6 +203,7 @@ struct model_constructor::imp {
             );
             SASSERT(is_val(result.get()));
             m_app2val.insert(a, result.get()); // memoize
+            m_m.inc_ref(a);
             m_m.inc_ref(result.get());
             return true;
         }
@@ -212,9 +229,10 @@ struct model_constructor::imp {
             func_decl * const a_fd = a->get_decl();
             SASSERT(ac->get_num_args() == 0);
             SASSERT(a_fd->get_range() == ac->get_decl()->get_range());
-            expr * value = m_abstr_model->get_const_interp(ac->get_decl());
+            expr_ref value(m_m);
+            value = m_abstr_model->get_const_interp(ac->get_decl());
             // get ackermann constant's interpretation
-            if (value == 0) { // TODO: avoid model completetion?
+            if (value.get() == 0) { // TODO: avoid model completion?
                 sort * s = a_fd->get_range();
                 value = m_abstr_model->get_some_value(s);
             }
@@ -236,6 +254,9 @@ struct model_constructor::imp {
                 vi.value = value;
                 vi.source_term = a;
                 m_values2val.insert(key,vi);
+                m_m.inc_ref(vi.source_term);
+                m_m.inc_ref(vi.value);
+                m_m.inc_ref(key);
                 return true;
             }
             UNREACHABLE();
@@ -247,6 +268,10 @@ struct model_constructor::imp {
             const unsigned num = values.size();
             func_decl * const fd = a->get_decl();
             const family_id fid = fd->get_family_id();
+            expr_ref term(m_m);
+            term = m_m.mk_app(a->get_decl(), values.c_ptr());
+            m_evaluator->operator() (term, result);
+            return;
             if (fid == m_b_rw.get_fid()) {
                 decl_kind k = fd->get_decl_kind();
                 if (k == OP_EQ) {
@@ -261,10 +286,12 @@ struct model_constructor::imp {
                 }
             } else {
                 br_status st = BR_FAILED;
-                if (fid == m_bv_rw.get_fid())
+                if (fid == m_bv_rw.get_fid()) {
                     st = m_bv_rw.mk_app_core(fd, num, values.c_ptr(), result);
-                else
+                }
+                else {
                     UNREACHABLE();
+                }
             }
         }
 };
