@@ -140,7 +140,6 @@ struct model_constructor::imp {
             const family_id fid = a->get_decl()->get_family_id();
             const bool rv = fid != null_family_id && a->get_num_args() == 0;
             SASSERT(rv == (m_bv_rw.is_numeral(a) || m_m.is_true(a) || m_m.is_false(a)));
-            TRACE("model_constructor", tout << "is_val " << mk_ismt2_pp(a, m_m, 2) << " : " << rv << ")\n";);
             return rv;
         }
 
@@ -269,8 +268,11 @@ struct model_constructor::imp {
             func_decl * const fd = a->get_decl();
             const family_id fid = fd->get_family_id();
             expr_ref term(m_m);
-            term = m_m.mk_app(a->get_decl(), values.c_ptr());
+            term = m_m.mk_app(a->get_decl(), num, values.c_ptr());
             m_evaluator->operator() (term, result);
+            TRACE("model_constructor",
+                tout << "eval(\n" << mk_ismt2_pp(term.get(), m_m, 2) << "\n->"
+                << mk_ismt2_pp(result.get(), m_m, 2) << ")\n"; );
             return;
             if (fid == m_b_rw.get_fid()) {
                 decl_kind k = fd->get_decl_kind();

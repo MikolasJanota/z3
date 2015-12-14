@@ -38,7 +38,9 @@ Revision History:
 #include"model_constructor.h"
 ///////////////
 #include"model_smt2_pp.h"
-
+#include"lackr_params.h"
+#include"cooperate.h"
+///////////////
 #include"array_decl_plugin.h"
 #include"simplifier_plugin.h"
 #include"basic_simplifier_plugin.h"
@@ -67,8 +69,6 @@ struct simp_wrap {
 
         simp.register_plugin(&bsp);
         simp.register_plugin(&bvsp);
-        //simp.register_plugin(&asp);
-        //simp.enable_ac_support(true);
     }
 
     ~simp_wrap() {
@@ -104,18 +104,18 @@ public:
         g->get_formulas(flas);
         expr_ref f(m);
         f=m.mk_and(flas.size(), flas.c_ptr());
-        // Running implementation
-        imp i(m, m_p, f);
-        const lbool o = i();
+        // running implementation
+        m_imp = alloc(imp, m, m_p, f);
+        const lbool o = m_imp->operator()();
         flas.reset();
-        // Report result
+        // report result
         goal_ref resg(alloc(goal, *g, true));
         if (o == l_false) resg->assert_expr(m.mk_false());
         if (o != l_undef) result.push_back(resg.get());
-        // Report model
+        // report model
         if (g->models_enabled() && (o == l_true)) {
-            model_ref abstr_model = i.get_model();
-            mc = mk_lackr_model_converter(m, i.get_info(), abstr_model);
+            model_ref abstr_model = m_imp->get_model();
+            mc = mk_lackr_model_converter(m, m_imp->get_info(), abstr_model);
         }
     }
 
@@ -124,96 +124,90 @@ public:
     virtual tactic* translate(ast_manager& m) {
         return alloc(lackr_tactic, m, m_p);
     }
+
+    virtual void set_cancel(bool f) {
+        #pragma omp critical (lackr_tactic) 
+        {
+            if (m_imp) m_imp->set_cancel(f);
+        }
+    }
 private:
     struct imp {
       public:
         imp(ast_manager& m, params_ref p, expr_ref _f)
-          : m(m)
-          , p(p)
-          , f(m)
-          , a(m)
-          , sat(0)
-          , bu(m)
-          , au(m)
-          , simp(m)
-          , ackrs(m)
+          : m_m(m)
+          , m_p(p)
+          , m_fla(m)
+          , m_abstr(m)
+          , m_sat(0)
+          , m_bvutil(m)
+          , m_simp(m)
+          , m_ackrs(m)
         {
-            simp_wrap _s(m);
-            _s(_f, f);     
-            //f = _f;
+            //simp_wrap _s(m_m);
+            //_s(_f, m_fla);     
+            m_fla = _f;
         }
 
         void setup_sat() {
             if (1) {
-                std::cout << "c qfbv sat\n";
-                //std::cout << "c inc sat\n";
-                //sat = mk_inc_sat_solver(m, p);
-                tactic_ref t = mk_qfbv_tactic(m, p);
-                sat = mk_tactic2solver(m, t.get(), p);
+                //std::cout << "; qfbv sat\n";
+                tactic_ref t = mk_qfbv_tactic(m_m, m_p);
+                m_sat = mk_tactic2solver(m_m, t.get(), m_p);
             }
             else {
-                std::cout << "c smt sat\n";
-                tactic_ref t = mk_qfaufbv_tactic(m, p);
-                sat = mk_tactic2solver(m, t.get(), p);
+                //std::cout << "; smt sat\n";
+                tactic_ref t = mk_qfaufbv_tactic(m_m, m_p);
+                m_sat = mk_tactic2solver(m_m, t.get(), m_p);
             }
-            SASSERT(sat);
-            sat->set_produce_models(true);
+            SASSERT(m_sat);
+            m_sat->set_produce_models(true);
         }
 
         lbool operator() () {
-            if(0) {
-                tactic_ref t = mk_qfaufbv_tactic(m, p);
-                scoped_ptr<solver> sol = mk_tactic2solver(m, t.get(), p);
-                sol->assert_expr(f);
-                std::cerr << "; begin\n";
-                sol->display(std::cerr);
-                std::cerr << "; end\n";
-                //return l_undef;
-            }
             setup_sat();
             const bool ok = init();
             if (!ok) return l_undef;
-            TRACE("lackr", tout << "sat goal\n"; sat->display(tout););
-            //std::cout << "sat goal\n"; sat->display(std::cout);
+            TRACE("lackr", tout << "sat goal\n"; m_sat->display(tout););
             TRACE("lackr", tout << "run sat\n"; );
-            const lbool rv = 0 ? eager() : lazy();
-            if (rv == l_true) sat->get_model(m_model);
-            //if (rv == l_true) {
-            //    model_constructor mc(m, info);
-            //    SASSERT(mc.check(m_model));
-            //}
+            const lbool rv = 1 ? eager() : lazy();
+            if (rv == l_true) m_sat->get_model(m_model);
 
             TRACE("lackr", tout << "sat:" << rv << '\n'; );
-            TRACE("lackr",
-                if (rv == l_true)
-                   model_smt2_pp(tout << "abstr_model(\n", m, *(m_model.get()), 2); tout << ")\n";
-            );
+            CTRACE("lackr", rv == l_true,
+                model_smt2_pp(tout << "abstr_model(\n", m_m, *(m_model.get()), 2); tout << ")\n"; );
             return rv;
           }
 
         lbool eager() {
             if (!eager_enc()) return l_undef;
-            ackrs.push_back(a);
-            expr_ref all(m);
-            all = m.mk_and(ackrs.size(), ackrs.c_ptr());
-            simp(all);
-            sat->assert_expr(all);
-            return sat->check_sat(0, 0);
+            m_sat->assert_expr(m_abstr);
+            if (m_sat->check_sat(0, 0) == l_false)
+               return l_false;
+            checkpoint();
+            expr_ref all(m_m);
+            all = m_m.mk_and(m_ackrs.size(), m_ackrs.c_ptr());
+            m_simp(all);
+            m_sat->assert_expr(all);
+            return m_sat->check_sat(0, 0);
         }
 
 
         lbool lazy() {
-            model_constructor mc(m, info);
-            sat->assert_expr(a);
+            model_constructor mc(m_m, m_info);
+            m_sat->assert_expr(m_abstr);
             unsigned ackr_head = 0;
+            unsigned it = 0;
             while (1) {
+                checkpoint();
+                //std::cout << "it: " << ++it << "\n";
                 TRACE("lackr", tout << "lazy check\n";);
-                const lbool r = sat->check_sat(0, 0);
+                const lbool r = m_sat->check_sat(0, 0);
                 if (r == l_undef) return l_undef; // give up
                 if (r == l_false) return l_false; // abstraction unsat
                 // reconstruct model
                 model_ref am;
-                sat->get_model(am);
+                m_sat->get_model(am);
                 const bool mc_res = mc.check(am);
                 if (mc_res) return l_true; // model okay
                 // refine abstraction
@@ -222,44 +216,61 @@ private:
                      i != conflicts.end(); ++i) {
                     ackr(i->first, i->second);
                 }
-                while (ackr_head < ackrs.size()) {
-                    sat->assert_expr(ackrs.get(ackr_head++));
+                while (ackr_head < m_ackrs.size()) {
+                    m_sat->assert_expr(m_ackrs.get(ackr_head++));
                 }
             }            
         }
 
 
         ~imp() {
-            const f2tt::iterator e = f2t.end();
-            for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
+            const fun2terms_map::iterator e = m_fun2terms.end();
+            for (fun2terms_map::iterator i = m_fun2terms.begin(); i != e; ++i) {
                 dealloc(i->get_value());
             }
         }
 
-        ackr_info_ref get_info() {return info;}
+        virtual void set_cancel(bool f) {
+            #pragma omp critical (lackr)
+            {
+                m_cancel = f;
+                if (m_sat == NULL) return;
+                if (f) m_sat->cancel();
+                else m_sat->reset_cancel();
+            }
+        }
+
+        void checkpoint() {
+            if (m_cancel)
+                throw tactic_exception(TACTIC_CANCELED_MSG);
+            cooperate("lackr");
+        }
+
+        ackr_info_ref get_info() {return m_info;}
         model_ref get_model() { return m_model; }
       private:
-        typedef obj_hashtable<app> app_set;
-        typedef obj_map<func_decl, app_set*> f2tt;
-        ast_manager& m;
-        params_ref p;
-        expr_ref f;
-        expr_ref a;
-        f2tt f2t;
-        ackr_info_ref info;
-        scoped_ptr<solver> sat;
-        bv_util bu;
-        array_util au;
-        th_rewriter simp;
-        expr_ref_vector ackrs;
-        model_ref m_model;
+        typedef obj_hashtable<app>           app_set;
+        typedef obj_map<func_decl, app_set*> fun2terms_map;
+        ast_manager&                         m_m;
+        params_ref                           m_p;
+        expr_ref                             m_fla;
+        expr_ref                             m_abstr;
+        fun2terms_map                        m_fun2terms;
+        ackr_info_ref                        m_info;
+        scoped_ptr<solver>                   m_sat;
+        bv_util                              m_bvutil;
+        th_rewriter                          m_simp;
+        expr_ref_vector                      m_ackrs;
+        model_ref                            m_model;
+        volatile bool                        m_cancel;
+
 
         bool init() {
-            params_ref simp_p(p);
+            params_ref simp_p(m_p);
 //            simp_p.set_bool("pull_cheap_ite", true);
  //           simp_p.set_bool("ite_extra_rules", true);
-            simp.updt_params(simp_p);
-            info = alloc(ackr_info, m);
+            m_simp.updt_params(simp_p);
+            m_info = alloc(ackr_info, m_m);
             bool iok = collect_terms() && abstract();
             if (!iok) return false;
             return true;
@@ -270,41 +281,39 @@ private:
         //
         bool ackr(app * const t1, app * const t2) {
             TRACE("lackr", tout << "ackr "
-                << mk_ismt2_pp(t1, m, 2)
+                << mk_ismt2_pp(t1, m_m, 2)
                 << " , "
-                << mk_ismt2_pp(t2, m, 2) << "\n";);
+                << mk_ismt2_pp(t2, m_m, 2) << "\n";);
             const unsigned sz = t1->get_num_args();
-            expr_ref_vector eqs(m);
-            const unsigned six = au.is_select(t1) ? 1 : 0;
-            for (unsigned gi = six; gi < sz; ++gi) {
+            expr_ref_vector eqs(m_m);
+            for (unsigned gi = 0; gi < sz; ++gi) {
                 expr * const arg1 = t1->get_arg(gi);
                 expr * const arg2 = t2->get_arg(gi);
                 if (arg1 == arg2) continue;
-                if (bu.is_numeral(arg1) && bu.is_numeral(arg2)) {
+                if (m_bvutil.is_numeral(arg1) && m_bvutil.is_numeral(arg2)) {
                     SASSERT(arg1 != arg2);
                     TRACE("lackr", tout << "never eq\n";);
                     return true;
                 }
-                eqs.push_back(m.mk_eq(arg1, arg2));
+                eqs.push_back(m_m.mk_eq(arg1, arg2));
             }
-            app * const a1 = info->get_abstr(t1);
-            app * const a2 = info->get_abstr(t2);
+            app * const a1 = m_info->get_abstr(t1);
+            app * const a2 = m_info->get_abstr(t2);
             SASSERT(a1);
             SASSERT(a2);
-            TRACE("lackr", tout << "abstr1 " << mk_ismt2_pp(a1, m, 2) << "\n";);
-            TRACE("lackr", tout << "abstr2 " << mk_ismt2_pp(a2, m, 2) << "\n";);
-            expr_ref lhs(m.mk_and(eqs.size(), eqs.c_ptr()), m);
-            TRACE("lackr", tout << "ackr constr lhs" << mk_ismt2_pp(lhs, m, 2) << "\n";);
-            expr_ref rhs(m.mk_eq(a1, a2),m);
-            TRACE("lackr", tout << "ackr constr rhs" << mk_ismt2_pp(rhs, m, 2) << "\n";);
-            expr_ref cg(m.mk_implies(lhs, rhs), m);
-            TRACE("lackr", tout << "ackr constr" << mk_ismt2_pp(cg, m, 2) << "\n";);
-            expr_ref cga(m);
-            info->abstract(cg, cga);
-            simp(cga);
-            TRACE("lackr", tout << "ackr constr abs:" << mk_ismt2_pp(cga, m, 2) << "\n";);
-            if (!m.is_true(cga)) ackrs.push_back(cga);
-            //sat->assert_expr(cga.get());
+            TRACE("lackr", tout << "abstr1 " << mk_ismt2_pp(a1, m_m, 2) << "\n";);
+            TRACE("lackr", tout << "abstr2 " << mk_ismt2_pp(a2, m_m, 2) << "\n";);
+            expr_ref lhs(m_m.mk_and(eqs.size(), eqs.c_ptr()), m_m);
+            TRACE("lackr", tout << "ackr constr lhs" << mk_ismt2_pp(lhs, m_m, 2) << "\n";);
+            expr_ref rhs(m_m.mk_eq(a1, a2),m_m);
+            TRACE("lackr", tout << "ackr constr rhs" << mk_ismt2_pp(rhs, m_m, 2) << "\n";);
+            expr_ref cg(m_m.mk_implies(lhs, rhs), m_m);
+            TRACE("lackr", tout << "ackr constr" << mk_ismt2_pp(cg, m_m, 2) << "\n";);
+            expr_ref cga(m_m);
+            m_info->abstract(cg, cga);
+            m_simp(cga);
+            TRACE("lackr", tout << "ackr constr abs:" << mk_ismt2_pp(cga, m_m, 2) << "\n";);
+            if (!m_m.is_true(cga)) m_ackrs.push_back(cga);
             return true;
         }
 
@@ -312,8 +321,9 @@ private:
         // Introduce the ackermann lemma for each pair of terms.
         //
         bool eager_enc() {
-            const f2tt::iterator e = f2t.end();
-            for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
+            const fun2terms_map::iterator e = m_fun2terms.end();
+            for (fun2terms_map::iterator i = m_fun2terms.begin(); i != e; ++i) {
+                checkpoint();
                 func_decl* const fd = i->m_key;
                 app_set * const ts = i->get_value();
                 const app_set::iterator r = ts->end();
@@ -323,7 +333,6 @@ private:
                     for (;  k != r; ++k) {
                         app * const t1 = *j;
                         app * const t2 = *k;
-                        //   if (t1->get_id() >= t2->get_id()) continue;
                         SASSERT(t1->get_decl() == fd);
                         SASSERT(t2->get_decl() == fd);
                         if (t1 == t2) continue;
@@ -335,44 +344,42 @@ private:
         }
 
         bool abstract() {
-            const f2tt::iterator e = f2t.end();
-            for (f2tt::iterator i = f2t.begin(); i != e; ++i) {
+            const fun2terms_map::iterator e = m_fun2terms.end();
+            for (fun2terms_map::iterator i = m_fun2terms.begin(); i != e; ++i) {
                 func_decl* const fd = i->m_key;
                 app_set * const ts = i->get_value();
                 sort* const s = fd->get_range();
                 const app_set::iterator r = ts->end();
                 for (app_set::iterator j = ts->begin(); j != r; ++j) {
-                    app * const fc = m.mk_fresh_const(fd->get_name().str().c_str(), s);
+                    app * const fc = m_m.mk_fresh_const(fd->get_name().str().c_str(), s);
                     app * const t = *j;
                     SASSERT(t->get_decl() == fd);
-                    info->set_abstr(t, fc);
+                    m_info->set_abstr(t, fc);
                     TRACE("lackr", tout << "abstr term "
-                        << mk_ismt2_pp(t, m, 2)
+                        << mk_ismt2_pp(t, m_m, 2)
                         << " -> "
-                        << mk_ismt2_pp(fc, m, 2)
+                        << mk_ismt2_pp(fc, m_m, 2)
                         << "\n";);
                 }
             }
-            info->seal();
-            info->abstract(f.get(), a);
-            //simp(a);
-            //sat->assert_expr(a);
-            TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(a.get(), m, 2) << ")\n";);
+            m_info->seal();
+            m_info->abstract(m_fla.get(), m_abstr);
+            TRACE("lackr", tout << "abs(\n" << mk_ismt2_pp(m_abstr.get(), m_m, 2) << ")\n";);
             return true;
         }
 
         void add_term(app* a) {
-            //TRACE("lackr", tout << "inspecting term(\n" << mk_ismt2_pp(a, m, 2) << ")\n";);
+            //TRACE("lackr", tout << "inspecting term(\n" << mk_ismt2_pp(m_abstr, m_m, 2) << ")\n";);
             if (a->get_num_args() == 0) return;
             func_decl* const fd = a->get_decl();
-            if (!is_uninterp(a) && !au.is_select(a)) return;
-            SASSERT(bu.is_bv_sort(fd->get_range()) || m.is_bool(a));
+            if (!is_uninterp(a)) return;
+            SASSERT(m_bvutil.is_bv_sort(fd->get_range()) || m_m.is_bool(m_abstr));
             app_set* ts = 0;
-            if (!f2t.find(fd, ts)) {
+            if (!m_fun2terms.find(fd, ts)) {
                 ts = alloc(app_set);
-                f2t.insert(fd, ts);
+                m_fun2terms.insert(fd, ts);
             }
-            TRACE("lackr", tout << "term(" << mk_ismt2_pp(a, m, 2) << ")\n";);
+            TRACE("lackr", tout << "term(" << mk_ismt2_pp(m_abstr, m_m, 2) << ")\n";);
             ts->insert(a);
         }
 
@@ -380,7 +387,7 @@ private:
             ptr_vector<expr> stack;
             expr *           curr;
             expr_mark        visited;
-            stack.push_back(f.get());
+            stack.push_back(m_fla.get());
             while (!stack.empty()) {
                 curr = stack.back();
                 if (visited.is_marked(curr)) {
@@ -421,13 +428,14 @@ private:
         }
     };
 private:
-    ast_manager& m_m;
-    params_ref m_p;
+    ast_manager&                         m_m;
+    params_ref                           m_p;
+    scoped_ptr<imp>                      m_imp;
 };
 
 tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
-    //return and_then(mk_nnf_tactic(m, p), alloc(lackr_tactic, m, p));
-    //return alloc(lackr_tactic, m, p);
+    //return and_then(mk_nnf_tactic(m_m, m_p), alloc(lackr_tactic, m_m, m_p));
+    //return alloc(lackr_tactic, m_m, m_p);
     //params_ref main_p;
     //main_p.set_bool("elim_and", true);
     //main_p.set_bool("sort_store", true);
@@ -435,14 +443,11 @@ tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
     //main_p.set_bool("expand_store_eq", true);
 
     params_ref simp2_p = p;
-    simp2_p.set_bool("som", false);
-    simp2_p.set_bool("pull_cheap_ite", false);
+    simp2_p.set_bool("som", true);
+    simp2_p.set_bool("pull_cheap_ite", true);
     simp2_p.set_bool("push_ite_bv", false);
-    simp2_p.set_bool("push_ite_arith", false);
     simp2_p.set_bool("local_ctx", true);
-    //simp2_p.set_bool("flat", false);
     simp2_p.set_uint("local_ctx_limit", 10000000);
-
 
     simp2_p.set_bool("ite_extra_rules", true);
     //simp2_p.set_bool("blast_eq_value", true);
@@ -455,14 +460,14 @@ tactic * mk_lackr_tactic(ast_manager & m, params_ref const & p) {
     tactic * const preamble_t = and_then(
         mk_simplify_tactic(m),
         mk_propagate_values_tactic(m),
-        //using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
+        //using_params(mk_ctx_simplify_tactic(m_m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
         if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),       
         mk_max_bv_sharing_tactic(m),
-        mk_macro_finder_tactic(m, p)
-        //using_params(mk_simplify_tactic(m), simp2_p)
-        //mk_nnf_tactic(m, p)
+        mk_macro_finder_tactic(m, p),
+        using_params(mk_simplify_tactic(m), simp2_p)
+        //mk_nnf_tactic(m_m, m_p)
         );
 
     return and_then(
