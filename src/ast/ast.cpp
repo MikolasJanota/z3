@@ -516,7 +516,7 @@ inline unsigned ast_array_hash(T * const * array, unsigned size, unsigned init_v
         switch (size) {
         case 2:
             b += array[1]->hash();
-            __fallthrough;
+            Z3_fallthrough;
         case 1:
             c += array[0]->hash();
         }
@@ -1430,12 +1430,6 @@ ast_manager::~ast_manager() {
         tmp.close();
         dealloc(m_trace_stream);
         m_trace_stream = 0;
-    }
-}
-
-void ast_manager::set_cancel(bool f) {
-    for (unsigned i = 0; i < m_plugins.size(); i++) {
-        m_plugins[i]->set_cancel(f);
     }
 }
 
