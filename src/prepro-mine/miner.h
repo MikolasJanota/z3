@@ -20,9 +20,10 @@
 class miner {
     public:
         miner(ast_manager& m);
+        virtual ~miner();
         void operator() (expr_ref f);
     private:
         struct            imp;
-        scoped_ptr<imp>   m_imp;
+        imp*              m_imp;
 };
 #endif /* MINER_H_17438 */

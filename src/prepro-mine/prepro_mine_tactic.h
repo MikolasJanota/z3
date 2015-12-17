@@ -18,4 +18,10 @@
 #define PREPRO_MINE_TACTIC_H_724
 #include"tactical.h"
 tactic * mk_prepro_mine_tactic(ast_manager& m, params_ref const & p);
+
+/*
+ADD_TACTIC("prepro-miner", "prepro-miner.", "mk_prepro_mine_tactic(m, p)")
+*/
+
+
 #endif /* PREPRO_MINE_TACTIC_H_724 */
