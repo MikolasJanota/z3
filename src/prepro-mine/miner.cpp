@@ -28,24 +28,55 @@
 
 struct miner::imp {
     ast_manager&                   m_m;
-    model_ref                      m_assignment;
-    scoped_ptr<model_evaluator>    m_evaluator;
+    vector<model_ref>              m_assignments;
+    ptr_vector<model_evaluator>    m_evaluators;
+    decl_collector*                m_collector;
 
     imp(ast_manager & m)
-        :m_m(m)
-    {}
+        : m_m(m)
+        , m_collector(NULL) {}
 
-    void operator()(expr_ref f) {
-        decl_collector collector(m_m, false);
-        collector.visit(f.get());
-        for (unsigned i = 0; i < collector.get_num_sorts(); ++i) {
-            if (((collector.get_sorts())[i])->get_family_id() == null_family_id) UNREACHABLE();
+    ~imp() { cleanup(); }
+
+    void operator() (expr_ref f) {
+        init(f);
+        traverse(f);
+    }
+
+    void init(expr_ref& f) {
+        cleanup();
+        m_collector = alloc(decl_collector, m_m, false);
+        m_collector->visit(f.get());
+        init_models();
+    }
+
+    void cleanup() {
+        m_assignments.reset();
+        while (m_evaluators.size()) {
+            dealloc(m_evaluators.back());
+            m_evaluators.pop_back();
+        }
+        if (m_collector) {
+            dealloc(m_collector);
+            m_collector = NULL;
+        }
+    }
+
+    void init_models() {
+        for (unsigned i = 0; i < m_collector->get_num_sorts(); ++i) {//TODO: needed?
+            if (((m_collector->get_sorts())[i])->get_family_id() == null_family_id)
+                UNREACHABLE();
         }
         assignment_maker am(m_m);
-        m_assignment = alloc(model, m_m);
-        am(collector.get_num_decls(), collector.get_func_decls(), m_assignment);
-        m_evaluator = alloc(model_evaluator, *(m_assignment.get()));
-        traverse(f);
+        const unsigned size = m_collector->get_num_decls();
+        func_decl * const * const declarations = m_collector->get_func_decls();
+        for (unsigned i = 0; i < 2; ++i) {
+          am.set_polarity(i & 1);
+          model_ref a(alloc(model, m_m));
+          am(size, declarations, a);
+          m_assignments.push_back(a);
+          m_evaluators.push_back(alloc(model_evaluator, *(a.get())));
+        }
     }
 
     inline bool is_val(const expr * e) {
@@ -63,7 +94,12 @@ struct miner::imp {
         if (term->get_depth() > 5) return false; //TODO: introduce a parameter
         if (is_val_ap(term)) return false;
         expr_ref value(m_m);
-        (*m_evaluator)(term, value);
+        expr_ref value1(m_m);
+        m_evaluators[0]->operator() (term, value);
+        for (unsigned i = 1; i < m_evaluators.size(); i++) {
+            m_evaluators[i]->operator() (term, value1);
+            if (value != value1) return false;
+        }
         SASSERT(is_val(value.get()));
         expr_ref eq(m_m.mk_eq(term, value), m_m);
         const lbool t = is_tautology(eq);
