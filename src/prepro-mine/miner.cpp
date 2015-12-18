@@ -90,10 +90,10 @@ struct miner::imp {
         return rv;
     }
 
-    bool test_term(app * term) {
+    bool test_term(app * term, expr_ref& value) {
+        SASSERT(term);
         if (term->get_depth() > 5) return false; //TODO: introduce a parameter
         if (is_val_ap(term)) return false;
-        expr_ref value(m_m);
         expr_ref value1(m_m);
         m_evaluators[0]->operator() (term, value);
         for (unsigned i = 1; i < m_evaluators.size(); i++) {
@@ -114,6 +114,7 @@ struct miner::imp {
         expr *           curr;
         expr_mark        visited;
         stack.push_back(f.get());
+        expr_ref         constant_value(m_m);
 
         while (!stack.empty()) {
             curr = stack.back();
@@ -135,7 +136,7 @@ struct miner::imp {
                                                a->get_num_args(), a->get_args())) {
                             visited.mark(a, true);
                             stack.pop_back();
-                            test_term(a);
+                            test_term(a, constant_value);
                         }
                     }
                     break;
@@ -168,4 +169,8 @@ struct miner::imp {
 
 miner::miner(ast_manager& m) : m_imp(alloc(imp, m)) {}
 void miner::operator() (expr_ref f) { m_imp->operator() (f); }
+void miner::init(expr_ref f) { m_imp->init(f); }
+bool miner::test_term(app * term, expr_ref& value) {
+    return m_imp->test_term(term, value);
+}
 miner::~miner() { if (m_imp) dealloc(m_imp); }

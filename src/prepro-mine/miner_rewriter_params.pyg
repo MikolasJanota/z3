@@ -1,0 +1,7 @@
+def_module_params('miner_rewriter', 
+                  export=True,
+                  params=(max_memory_param(),
+                          max_steps_param(),
+                          ('cache', BOOL, True, 'cache intermediate results in the model evaluator')
+                          ))
+

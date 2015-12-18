@@ -22,6 +22,8 @@ class miner {
         miner(ast_manager& m);
         virtual ~miner();
         void operator() (expr_ref f);
+        void init(expr_ref f);
+        bool test_term(app * term, expr_ref& value);
     private:
         struct            imp;
         imp*              m_imp;
