@@ -109,8 +109,8 @@ struct miner::imp {
         expr_ref eq(m_m.mk_eq(term, value), m_m);
         const lbool t = is_tautology(eq);
         if (t != l_true) return false;
-        if(m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" <<
-            mk_ismt2_pp(value, m_m, 2) << "\n";
+        if(m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(value, m_m, 2) << "\n";
+        TRACE("miner_rewriter", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(value, m_m, 2) << "\n";);
         return true;
     }
 

@@ -40,24 +40,31 @@ public:
                             /* out */ model_converter_ref & mc,
                             /* out */ proof_converter_ref & pc,
                             /* out */ expr_dependency_ref & core) {
-        mc = 0;
-        ast_manager& m(g->m());
-        TRACE("miner_rewriter", g->display(tout << "Goal:\n"););
-        // conflate all assertions into one conjunction
-        ptr_vector<expr> flas;
-        g->get_formulas(flas);
-        expr_ref f(m);
-        f = m.mk_and(flas.size(), flas.c_ptr());
-        flas.reset();
-        // running implementation
+        run(*(g.get()));
+        g->inc_depth();
+        result.push_back(g.get());
+        mc = 0; pc = 0; core = 0;
+    }
+
+    void run(goal& g) {
+        ast_manager& m(g.m());
+        SASSERT(!g.proofs_enabled());
+        TRACE("miner_rewriter", g.display(tout << "Goal:\n"););
+        if (g.inconsistent()) return;
+        expr_ref   new_curr(m);
+        proof_ref  new_pr(m);
+        const unsigned size = g.size();
         miner_rewriter imp(m);
-        expr_ref res(m);
-        imp(f, res);
-        // report result
-        TRACE("miner_rewriter", tout << "res:\n" <<  mk_ismt2_pp(res.get(), m, 2) << "\n";);
-        goal_ref resg(alloc(goal, *g, true));
-        if (m.is_false(res)) resg->assert_expr(m.mk_false());
-        if (m.is_true(res)) result.push_back(resg.get());
+        for (unsigned idx = 0; idx < size; idx++) {
+            if (g.inconsistent()) break;
+            // running implementation
+            expr_ref curr(g.form(idx), m);
+            expr_ref new_curr(m);
+            imp(curr, new_curr);
+            g.update(idx, new_curr, new_pr, g.dep(idx));
+        }
+        g.elim_redundancies();
+        TRACE("miner_rewriter", g.display(tout << "Result:\n"););
     }
 
     virtual tactic* translate(ast_manager& m) {
@@ -95,7 +102,19 @@ tactic * mk_prepro_mine_rewrite_tactic(ast_manager& m, params_ref const & p) {
             using_params(mk_simplify_tactic(m), simp2_p)
             );
 
+    tactic * const postprocessing_t = and_then(
+        mk_simplify_tactic(m),
+        mk_propagate_values_tactic(m),
+        //            using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
+        mk_solve_eqs_tactic(m),
+        mk_elim_uncnstr_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
+        mk_max_bv_sharing_tactic(m),
+        using_params(mk_simplify_tactic(m), simp2_p)
+        );
+
     return and_then(
             preamble_t,
-            alloc(prepro_mine_rewrite_tactic, m, p));
+            alloc(prepro_mine_rewrite_tactic, m, p),
+            postprocessing_t);
 }
