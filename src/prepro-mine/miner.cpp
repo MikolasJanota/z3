@@ -31,16 +31,21 @@ struct miner::imp {
     vector<model_ref>              m_assignments;
     ptr_vector<model_evaluator>    m_evaluators;
     decl_collector*                m_collector;
+    bool                           m_print;
 
     imp(ast_manager & m)
         : m_m(m)
-        , m_collector(NULL) {}
+        , m_collector(NULL)
+        , m_print(0) {}
 
     ~imp() { cleanup(); }
 
     void operator() (expr_ref f) {
+        _print = m_print;
+        m_print = true;
         init(f);
         traverse(f);
+        m_print = _print;
     }
 
     void init(expr_ref& f) {
@@ -104,7 +109,7 @@ struct miner::imp {
         expr_ref eq(m_m.mk_eq(term, value), m_m);
         const lbool t = is_tautology(eq);
         if (t != l_true) return false;
-        std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" <<
+        if(m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" <<
             mk_ismt2_pp(value, m_m, 2) << "\n";
         return true;
     }
