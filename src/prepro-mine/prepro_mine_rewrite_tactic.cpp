@@ -26,6 +26,12 @@
 #include"bv_size_reduction_tactic.h"
 #include"ctx_simplify_tactic.h"
 ///////////////
+///////////////
+//#include"qfaufbv_tactic.h"
+//#include"qfbv_tactic.h"
+//#include"tactic2solver.h"
+///////////////
+
 class prepro_mine_rewrite_tactic : public tactic {
     ast_manager&    m_m;
     params_ref      m_params;
@@ -64,6 +70,13 @@ public:
             g.update(idx, new_curr, new_pr, g.dep(idx));
         }
         g.elim_redundancies();
+//        {
+//            tactic_ref t = mk_qfaufbv_tactic(m_m);
+//            scoped_ptr<solver> s = mk_tactic2solver(m_m, t.get());
+//            const unsigned size = g.size();
+//            for (unsigned idx = 0; idx < size; idx++) s->assert_expr(g.form(idx));
+//            s->display(std::cerr << "; After mining\n");
+//        }
         TRACE("miner_rewriter", g.display(tout << "Result:\n"););
     }
 
@@ -115,6 +128,6 @@ tactic * mk_prepro_mine_rewrite_tactic(ast_manager& m, params_ref const & p) {
 
     return and_then(
             preamble_t,
-            alloc(prepro_mine_rewrite_tactic, m, p),
-            postprocessing_t);
+            alloc(prepro_mine_rewrite_tactic, m, p)//,
+        );//            postprocessing_t);
 }

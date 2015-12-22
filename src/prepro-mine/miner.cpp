@@ -36,12 +36,12 @@ struct miner::imp {
     imp(ast_manager & m)
         : m_m(m)
         , m_collector(NULL)
-        , m_print(0) {}
+        , m_print(false) {}
 
     ~imp() { cleanup(); }
 
     void operator() (expr_ref f) {
-        _print = m_print;
+        const bool _print = m_print;
         m_print = true;
         init(f);
         traverse(f);
@@ -110,7 +110,7 @@ struct miner::imp {
         const lbool t = is_tautology(eq);
         if (t != l_true) return false;
         if(m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(value, m_m, 2) << "\n";
-        TRACE("miner_rewriter", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(value, m_m, 2) << "\n";);
+        TRACE("miner", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(value, m_m, 2) << "\n";);
         return true;
     }
 
