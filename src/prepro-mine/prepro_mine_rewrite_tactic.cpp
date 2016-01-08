@@ -27,9 +27,9 @@
 #include"ctx_simplify_tactic.h"
 ///////////////
 ///////////////
-//#include"qfaufbv_tactic.h"
-//#include"qfbv_tactic.h"
-//#include"tactic2solver.h"
+#include"qfaufbv_tactic.h"
+#include"qfbv_tactic.h"
+#include"tactic2solver.h"
 ///////////////
 
 class prepro_mine_rewrite_tactic : public tactic {
