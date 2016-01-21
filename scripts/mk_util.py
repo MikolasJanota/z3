@@ -79,7 +79,7 @@ TRACE = False
 DOTNET_ENABLED=False
 JAVA_ENABLED=False
 ML_ENABLED=False
-PYTHON_INSTALL_ENABLED=True
+PYTHON_INSTALL_ENABLED=False
 STATIC_LIB=False
 VER_MAJOR=None
 VER_MINOR=None
@@ -460,7 +460,7 @@ def find_ocaml_find():
         print ("Testing %s..." % OCAMLFIND)
     r = exec_cmd([OCAMLFIND, 'printconf'])
     if r != 0:
-        OCAMLFIND=''
+        OCAMLFIND = ''
 
 def find_ml_lib():
     global OCAML_LIB
@@ -612,6 +612,7 @@ def display_help(exit_code):
     print("  --dotnet                      generate .NET bindings.")
     print("  --java                        generate Java bindings.")
     print("  --ml                          generate OCaml bindings.")
+    print("  --python                      generate Python bindings.")
     print("  --staticlib                   build Z3 static library.")
     if not IS_WINDOWS:
         print("  -g, --gmp                     use GMP.")
@@ -629,6 +630,7 @@ def display_help(exit_code):
     print("  JDK_HOME   JDK installation directory (only relevant if -j or --java option is provided)")
     print("  JNI_HOME   JNI bindings directory (only relevant if -j or --java option is provided)")
     print("  OCAMLC     Ocaml byte-code compiler (only relevant with --ml)")
+    print("  OCAMLFIND  Ocaml find tool (only relevant with --ml)")
     print("  OCAMLOPT   Ocaml native compiler (only relevant with --ml)")
     print("  OCAML_LIB  Ocaml library directory (only relevant with --ml)")
     print("  CSC        C# Compiler (only relevant if .NET bindings are enabled)")
@@ -642,14 +644,14 @@ def display_help(exit_code):
 # Parse configuration option for mk_make script
 def parse_options():
     global VERBOSE, DEBUG_MODE, IS_WINDOWS, VS_X64, ONLY_MAKEFILES, SHOW_CPPS, VS_PROJ, TRACE, VS_PAR, VS_PAR_NUM
-    global DOTNET_ENABLED, JAVA_ENABLED, ML_ENABLED, STATIC_LIB, PREFIX, GMP, FOCI2, FOCI2LIB, PYTHON_PACKAGE_DIR, GPROF, GIT_HASH
+    global DOTNET_ENABLED, JAVA_ENABLED, ML_ENABLED, STATIC_LIB, PREFIX, GMP, FOCI2, FOCI2LIB, PYTHON_PACKAGE_DIR, GPROF, GIT_HASH, PYTHON_INSTALL_ENABLED
     global LINUX_X64, SLOW_OPTIMIZE, USE_OMP
     try:
         options, remainder = getopt.gnu_getopt(sys.argv[1:],
                                                'b:df:sxhmcvtnp:gj',
                                                ['build=', 'debug', 'silent', 'x64', 'help', 'makefiles', 'showcpp', 'vsproj',
                                                 'trace', 'dotnet', 'staticlib', 'prefix=', 'gmp', 'foci2=', 'java', 'parallel=', 'gprof',
-                                                'githash=', 'x86', 'ml', 'optimize', 'noomp', 'pypkgdir='])
+                                                'githash=', 'x86', 'ml', 'optimize', 'noomp', 'pypkgdir=', 'python'])
     except:
         print("ERROR: Invalid command line option")
         display_help(1)
@@ -708,6 +710,8 @@ def parse_options():
             ML_ENABLED = True
         elif opt in ('', '--noomp'):
             USE_OMP = False
+        elif opt in ('--python'):
+            PYTHON_INSTALL_ENABLED = True
         else:
             print("ERROR: Invalid command line option '%s'" % opt)
             display_help(1)
@@ -1339,6 +1343,9 @@ class PythonInstallComponent(Component):
         self.in_prefix_install = True
         self.libz3Component = libz3Component
 
+        if not PYTHON_INSTALL_ENABLED:
+            return
+
         if IS_WINDOWS:
             # Installing under Windows doesn't make sense as the install prefix is used
             # but that doesn't make sense under Windows
@@ -1357,7 +1364,15 @@ class PythonInstallComponent(Component):
         else:
             # Use path inside the prefix (should be the normal case on Linux)
             # CMW: Also normal on *BSD?
-            assert PYTHON_PACKAGE_DIR.startswith(PREFIX)
+            if not PYTHON_PACKAGE_DIR.startswith(PREFIX):
+                raise MKException(('The python package directory ({}) must live ' +
+                    'under the install prefix ({}) to install the python bindings.' +
+                    'Use --pypkgdir and --prefix to set the python package directory ' +
+                    'and install prefix respectively. Note that the python package ' +
+                    'directory does not need to exist and will be created if ' +
+                    'necessary during install.').format(
+                        PYTHON_PACKAGE_DIR,
+                        PREFIX))
             self.pythonPkgDir = strip_path_prefix(PYTHON_PACKAGE_DIR, PREFIX)
             self.in_prefix_install = True
 
@@ -1365,7 +1380,7 @@ class PythonInstallComponent(Component):
             assert not os.path.isabs(self.pythonPkgDir)
 
     def final_info(self):
-        if not PYTHON_PACKAGE_DIR.startswith(PREFIX):
+        if not PYTHON_PACKAGE_DIR.startswith(PREFIX) and PYTHON_INSTALL_ENABLED:
             print("Warning: The detected Python package directory (%s) is not "
                   "in the installation prefix (%s). This can lead to a broken "
                   "Python API installation. Use --pypkgdir= to change the "
@@ -1739,6 +1754,42 @@ class MLComponent(Component):
         self.stubs = "z3native_stubs"
         self.sub_dir = os.path.join('api', 'ml')
 
+        self.destdir = ""
+        self.ldconf = ""
+        # Calling _init_ocamlfind_paths() is postponed to later because
+        # OCAMLFIND hasn't been checked yet.
+
+    def _install_bindings(self):
+        # FIXME: Depending on global state is gross.  We can't pre-compute this
+        # in the constructor because we haven't tested for ocamlfind yet
+        return OCAMLFIND != ''
+
+    def _init_ocamlfind_paths(self):
+        """
+            Initialises self.destdir and self.ldconf
+
+            Do not call this from the MLComponent constructor because OCAMLFIND
+            has not been checked at that point
+        """
+        if self.destdir != "" and self.ldconf != "":
+            # Initialisation already done
+            return
+        # Use Ocamlfind to get the default destdir and ldconf path
+        self.destdir = check_output([OCAMLFIND, 'printconf', 'destdir'])
+        if self.destdir == "":
+            raise MKException('Failed to get OCaml destdir')
+
+        if not os.path.isdir(self.destdir):
+            raise MKException('The destdir reported by {ocamlfind} ({destdir}) does not exist'.format(ocamlfind=OCAMLFIND, destdir=self.destdir))
+
+        self.ldconf = check_output([OCAMLFIND, 'printconf', 'ldconf'])
+        if self.ldconf == "":
+            raise MKException('Failed to get OCaml ldconf path')
+
+    def final_info(self):
+        if not self._install_bindings():
+            print("WARNING: Could not find ocamlfind utility. OCaml bindings will not be installed")
+
     def mk_makefile(self, out):
         if is_ml_enabled():
             src_dir = self.to_src_dir
@@ -1818,7 +1869,7 @@ class MLComponent(Component):
                 out.write('\n')
 
     def mk_install_deps(self, out):
-        if is_ml_enabled() and OCAMLFIND != '':
+        if is_ml_enabled() and self._install_bindings():
             out.write(get_component(Z3_DLL_COMPONENT).dll_name + '$(SO_EXT) ')
             out.write(os.path.join(self.sub_dir, 'META '))
             out.write(os.path.join(self.sub_dir, 'z3ml.cma '))
@@ -1826,8 +1877,22 @@ class MLComponent(Component):
             out.write(os.path.join(self.sub_dir, 'z3ml.cmxs '))
 
     def mk_install(self, out):
-        if is_ml_enabled() and OCAMLFIND != '':
-            out.write('\t@%s install Z3 %s' % (OCAMLFIND, (os.path.join(self.sub_dir, 'META'))))
+        if is_ml_enabled() and self._install_bindings():
+            self._init_ocamlfind_paths()
+            in_prefix = self.destdir.startswith(PREFIX)
+            maybe_stripped_destdir = strip_path_prefix(self.destdir, PREFIX)
+            # Note that when doing a staged install with DESTDIR that modifying
+            # OCaml's ``ld.conf`` may fail. Therefore packagers will need to
+            # make their packages modify it manually at package install time
+            # as opposed to ``make install`` time.
+            MakeRuleCmd.make_install_directory(out,
+                                               maybe_stripped_destdir,
+                                               in_prefix=in_prefix)
+            out.write('\t@{ocamlfind} install -ldconf $(DESTDIR){ldconf} -destdir $(DESTDIR){ocaml_destdir} Z3 {metafile}'.format(
+                ldconf=self.ldconf,
+                ocamlfind=OCAMLFIND,
+                ocaml_destdir=self.destdir,
+                metafile=os.path.join(self.sub_dir, 'META')))
 
             for m in self.modules:
                 out.write(' ' + os.path.join(self.to_src_dir, m) + '.mli')
@@ -1845,8 +1910,12 @@ class MLComponent(Component):
             out.write('\n')
 
     def mk_uninstall(self, out):
-        if is_ml_enabled() and OCAMLFIND != '':
-            out.write('\t@%s remove Z3\n' % (OCAMLFIND))
+        if is_ml_enabled() and self._install_bindings():
+            self._init_ocamlfind_paths()
+            out.write('\t@{ocamlfind} remove -ldconf $(DESTDIR){ldconf} -destdir $(DESTDIR){ocaml_destdir} Z3\n'.format(
+                ldconf=self.ldconf,
+                ocamlfind=OCAMLFIND,
+                ocaml_destdir=self.destdir))
 
     def main_component(self):
         return is_ml_enabled()
@@ -2161,6 +2230,7 @@ def mk_config():
                 print('Java Compiler:  %s' % JAVAC)
             if is_ml_enabled():
                 print('OCaml Compiler: %s' % OCAMLC)
+                print('OCaml Find tool: %s' % OCAMLFIND)
                 print('OCaml Native:   %s' % OCAMLOPT)
                 print('OCaml Library:  %s' % OCAML_LIB)
     else:
@@ -2296,6 +2366,7 @@ def mk_config():
                 print('Java Compiler:  %s' % JAVAC)
             if is_ml_enabled():
                 print('OCaml Compiler: %s' % OCAMLC)
+                print('OCaml Find tool: %s' % OCAMLFIND)
                 print('OCaml Native:   %s' % OCAMLOPT)
                 print('OCaml Library:  %s' % OCAML_LIB)
             if is_dotnet_enabled():
@@ -3522,6 +3593,15 @@ class MakeRuleCmd(object):
         return "$(DESTDIR)$(PREFIX)/"
 
     @classmethod
+    def _is_str(cls, obj):
+        if sys.version_info.major > 2:
+            # Python 3 or newer. Strings are always unicode and of type str
+            return isinstance(obj, str)
+        else:
+            # Python 2. Has byte-string and unicode representation, allow both
+            return isinstance(obj, str) or isinstance(obj, unicode)
+
+    @classmethod
     def _install_root(cls, path, in_prefix, out, is_install=True):
         if not in_prefix:
             # The Python bindings on OSX are sometimes not installed inside the prefix.
@@ -3539,9 +3619,9 @@ class MakeRuleCmd(object):
     @classmethod
     def install_files(cls, out, src_pattern, dest, in_prefix=True):
         assert len(dest) > 0
-        assert isinstance(src_pattern, str)
+        assert cls._is_str(src_pattern)
         assert not ' ' in src_pattern
-        assert isinstance(dest, str)
+        assert cls._is_str(dest)
         assert not ' ' in dest
         assert not os.path.isabs(src_pattern)
         install_root = cls._install_root(dest, in_prefix, out)
@@ -3554,7 +3634,7 @@ class MakeRuleCmd(object):
     @classmethod
     def remove_installed_files(cls, out, pattern, in_prefix=True):
         assert len(pattern) > 0
-        assert isinstance(pattern, str)
+        assert cls._is_str(pattern)
         assert not ' ' in pattern
         install_root = cls._install_root(pattern, in_prefix, out, is_install=False)
 
@@ -3565,7 +3645,7 @@ class MakeRuleCmd(object):
     @classmethod
     def make_install_directory(cls, out, dir, in_prefix=True):
         assert len(dir) > 0
-        assert isinstance(dir, str)
+        assert cls._is_str(dir)
         assert not ' ' in dir
         install_root = cls._install_root(dir, in_prefix, out)
 
@@ -3579,8 +3659,8 @@ class MakeRuleCmd(object):
             Returns True iff ``temp_path`` is a path prefix
             of ``target_as_abs``
         """
-        assert isinstance(temp_path, str)
-        assert isinstance(target_as_abs, str)
+        assert cls._is_str(temp_path)
+        assert cls._is_str(target_as_abs)
         assert len(temp_path) > 0
         assert len(target_as_abs) > 0
         assert os.path.isabs(temp_path)
@@ -3596,8 +3676,8 @@ class MakeRuleCmd(object):
 
     @classmethod
     def create_relative_symbolic_link(cls, out, target, link_name):
-        assert isinstance(target, str)
-        assert isinstance(link_name, str)
+        assert cls._is_str(target)
+        assert cls._is_str(link_name)
         assert len(target) > 0
         assert len(link_name) > 0
         assert not os.path.isabs(target)
@@ -3634,8 +3714,8 @@ class MakeRuleCmd(object):
 
     @classmethod
     def create_symbolic_link(cls, out, target, link_name):
-        assert isinstance(target, str)
-        assert isinstance(link_name, str)
+        assert cls._is_str(target)
+        assert cls._is_str(link_name)
         assert not os.path.isabs(target)
 
         cls.write_cmd(out, 'ln -s {target} {install_root}{link_name}'.format(

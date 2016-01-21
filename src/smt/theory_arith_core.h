@@ -65,11 +65,47 @@ namespace smt {
     }
 
     template<typename Ext>
+    bool theory_arith<Ext>::is_int_expr(expr* e) {
+#if 0
+        return m_util.is_int(e);
+#else
+        if (m_util.is_int(e)) return true;
+        if (is_uninterp(e)) return false;
+        m_todo.reset();
+        m_todo.push_back(e);
+        rational r;
+        unsigned i = 0;
+        while (!m_todo.empty()) {
+            ++i;
+            if (i > 100) {
+                return false;
+            }
+            e = m_todo.back();
+            m_todo.pop_back();
+            if (m_util.is_to_real(e)) {
+                // pass
+            }
+            else if (m_util.is_numeral(e, r) && r.is_int()) {
+                // pass
+            }
+            else if (m_util.is_add(e) || m_util.is_mul(e)) {
+                m_todo.append(to_app(e)->get_num_args(), to_app(e)->get_args());
+            }
+            else {
+                return false;
+            }
+        }
+        return true;
+#endif
+    }
+
+
+    template<typename Ext>
     theory_var theory_arith<Ext>::mk_var(enode * n) {
         theory_var r = theory::mk_var(n);
         SASSERT(r == static_cast<int>(m_columns.size()));
         SASSERT(check_vector_sizes());
-        bool is_int  = m_util.is_int(n->get_owner());
+        bool is_int  = is_int_expr(n->get_owner());
         TRACE("mk_arith_var", tout << mk_pp(n->get_owner(), get_manager()) << " is_int: " << is_int << "\n";);
         m_columns          .push_back(column());
         m_data             .push_back(var_data(is_int));
@@ -835,7 +871,6 @@ namespace smt {
     void theory_arith<Ext>::mk_bound_axioms(atom * a1) {
         theory_var v = a1->get_var();
         atoms & occs = m_var_occs[v];
-        //SASSERT(v != 15);
         TRACE("mk_bound_axioms", tout << "add bound axioms for v" << v << " " << a1 << "\n";);
         if (!get_context().is_searching()) {
             //
@@ -974,9 +1009,9 @@ namespace smt {
                     --i;
                 }
             }            
-            TRACE("arith", 
+            CTRACE("arith", !atoms.empty(),  
                   for (unsigned i = 0; i < atoms.size(); ++i) {
-                      atoms[i]->display(*this, tout);
+                      atoms[i]->display(*this, tout); tout << "\n";
                   });
             ptr_vector<atom> occs(m_var_occs[v]);
 
@@ -1106,6 +1141,8 @@ namespace smt {
             kind = A_LOWER;
         app * lhs      = to_app(n->get_arg(0));
         app * rhs      = to_app(n->get_arg(1));
+        expr * rhs2;
+        if (m_util.is_to_real(rhs, rhs2) && is_app(rhs2)) { rhs = to_app(rhs2); }
         SASSERT(m_util.is_numeral(rhs));
         theory_var v   = internalize_term_core(lhs);
         if (v == null_theory_var) {
@@ -3040,7 +3077,7 @@ namespace smt {
             theory_var num = get_num_vars();
             bool refine = false;
             for (theory_var v = 0; v < num; v++) {
-                if (is_int(v))
+                if (is_int_src(v))
                     continue;
                 if (!get_context().is_shared(get_enode(v)))
                     continue;
@@ -3051,7 +3088,7 @@ namespace smt {
                 rational value = val.get_rational().to_rational() + m_epsilon.to_rational() * val.get_infinitesimal().to_rational();
                 theory_var v2;
                 if (mapping.find(value, v2)) {
-                    SASSERT(!is_int(v2));
+                    SASSERT(!is_int_src(v2));
                     if (get_value(v) != get_value(v2)) {
                         // v and v2 are not known to be equal. 
                         // The choice of m_epsilon is making them equal.
@@ -3093,7 +3130,7 @@ namespace smt {
             TRACE("arith", tout << "Truncating non-integer value. This is possible for non-linear constraints v" << v << " " << num << "\n";);
             num = floor(num);
         }
-        return alloc(expr_wrapper_proc, m_factory->mk_value(num, is_int(v)));
+        return alloc(expr_wrapper_proc, m_factory->mk_value(num, m_util.is_int(var2expr(v))));
     }
 
     // -----------------------------------

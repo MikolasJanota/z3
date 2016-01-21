@@ -192,6 +192,7 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_length_coherence(ast_manager& m, expr* e) : m_e(e, m) {}
+            virtual ~replay_length_coherence() {}
             virtual void operator()(theory_seq& th) {
                 th.check_length_coherence(m_e);
                 m_e.reset();
@@ -202,6 +203,7 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_axiom(ast_manager& m, expr* e) : m_e(e, m) {}
+            virtual ~replay_axiom() {}
             virtual void operator()(theory_seq& th) {
                 th.enque_axiom(m_e);
                 m_e.reset();
@@ -239,6 +241,7 @@ namespace smt {
             unsigned m_solve_nqs;
             unsigned m_solve_eqs;
             unsigned m_add_axiom;
+            unsigned m_extensionality;
         };
         ast_manager&               m;
         dependency_manager         m_dm;
@@ -278,6 +281,7 @@ namespace smt {
         unsigned                       m_atoms_qhead;
         bool                           m_new_solution;     // new solution added
         bool                           m_new_propagation;  // new propagation to core
+        re2automaton                   m_mk_aut;
 
         virtual final_check_status final_check_eh();
         virtual bool internalize_atom(app* atom, bool) { return internalize_term(atom); }
@@ -301,6 +305,7 @@ namespace smt {
         virtual model_value_proc * mk_value(enode * n, model_generator & mg);
         virtual void init_model(model_generator & mg);
 
+        void init_model(expr_ref_vector const& es);
         // final check 
         bool simplify_and_solve_eqs();   // solve unitary equalities
         bool branch_variable();          // branch on a variable
@@ -310,6 +315,7 @@ namespace smt {
         bool check_length_coherence(expr* e);
         bool propagate_length_coherence(expr* e);  
 
+        bool check_extensionality();
         bool solve_eqs(unsigned start);
         bool solve_eq(expr_ref_vector const& l, expr_ref_vector const& r, dependency* dep);
         bool simplify_eq(expr_ref_vector& l, expr_ref_vector& r, dependency* dep);
@@ -332,7 +338,7 @@ namespace smt {
         void propagate_lit(dependency* dep, literal lit) { propagate_lit(dep, 0, 0, lit); }
         void propagate_lit(dependency* dep, unsigned n, literal const* lits, literal lit);
         void propagate_eq(dependency* dep, enode* n1, enode* n2);
-        void propagate_eq(literal lit, expr* e1, expr* e2, bool add_to_eqs = false);
+        void propagate_eq(literal lit, expr* e1, expr* e2, bool add_to_eqs);
         void set_conflict(dependency* dep, literal_vector const& lits = literal_vector());
 
         u_map<unsigned> m_branch_start;
@@ -351,6 +357,7 @@ namespace smt {
         bool is_tail(expr* a, expr*& s, unsigned& idx) const;
         expr_ref mk_nth(expr* s, expr* idx);
         expr_ref mk_last(expr* e);
+        expr_ref mk_first(expr* e);
         expr_ref canonize(expr* e, dependency*& eqs);
         bool canonize(expr* e, expr_ref_vector& es, dependency*& eqs);
         bool canonize(expr_ref_vector const& es, expr_ref_vector& result, dependency*& eqs);
@@ -410,7 +417,7 @@ namespace smt {
             return is_acc_rej(m_reject, rej, s, idx, re, i, aut);
         }
         bool is_acc_rej(symbol const& ar, expr* e, expr*& s, expr*& idx, expr*& re, unsigned& i, eautomaton*& aut);
-        expr_ref mk_step(expr* s, expr* tail, expr* re, unsigned i, unsigned j, expr* t);
+        expr_ref mk_step(expr* s, expr* tail, expr* re, unsigned i, unsigned j, expr* acc);
         bool is_step(expr* e, expr*& s, expr*& tail, expr*& re, expr*& i, expr*& j, expr*& t) const;
         bool is_step(expr* e) const;
         void propagate_step(literal lit, expr* n);
