@@ -63,7 +63,6 @@ enum seq_op_kind {
     OP_STRING_CONST,
     OP_STRING_ITOS, 
     OP_STRING_STOI, 
-    OP_REGEXP_LOOP,    // TBD re-loop: integers as parameters or arguments?
     // internal only operators. Converted to SEQ variants.
     _OP_STRING_STRREPL, 
     _OP_STRING_CONCAT, 
@@ -75,7 +74,9 @@ enum seq_op_kind {
     _OP_STRING_TO_REGEXP, 
     _OP_STRING_CHARAT, 
     _OP_STRING_SUBSTR,      
-    _OP_STRING_STRIDOF, 
+    _OP_STRING_STRIDOF,
+    _OP_REGEXP_EMPTY,
+    _OP_REGEXP_FULL,
     _OP_SEQ_SKOLEM,
     LAST_SEQ_OP
 };
@@ -99,6 +100,7 @@ public:
     zstring& operator=(zstring const& other);
     zstring replace(zstring const& src, zstring const& dst) const;
     unsigned num_bits() const { return (m_encoding==ascii)?8:16; }
+    encoding get_encoding() const { return m_encoding; }
     std::string encode() const; 
     unsigned length() const { return m_buffer.size(); }
     unsigned operator[](unsigned i) const { return m_buffer[i]; }
@@ -134,6 +136,7 @@ class seq_decl_plugin : public decl_plugin {
     symbol           m_charc_sym;
     sort*            m_string;
     sort*            m_char;
+    sort*            m_re;
 
     void match(psig& sig, unsigned dsz, sort* const* dom, sort* range, sort_ref& rng);
 
@@ -223,6 +226,7 @@ public:
         app* mk_concat(expr* a, expr* b) { expr* es[2] = { a, b }; return m.mk_app(m_fid, OP_SEQ_CONCAT, 2, es); }
         app* mk_concat(expr* a, expr* b, expr* c) { return mk_concat(a, mk_concat(b, c)); }
         expr* mk_concat(unsigned n, expr* const* es) { if (n == 1) return es[0]; SASSERT(n > 1); return m.mk_app(m_fid, OP_SEQ_CONCAT, n, es); }
+        expr* mk_concat(expr_ref_vector const& es) { return mk_concat(es.size(), es.c_ptr()); }
         app* mk_length(expr* a) { return m.mk_app(m_fid, OP_SEQ_LENGTH, 1, &a); }
         app* mk_substr(expr* a, expr* b, expr* c) { expr* es[3] = { a, b, c }; return m.mk_app(m_fid, OP_SEQ_EXTRACT, 3, es); }
         app* mk_contains(expr* a, expr* b) { expr* es[2] = { a, b }; return m.mk_app(m_fid, OP_SEQ_CONTAINS, 2, es); }
@@ -264,6 +268,7 @@ public:
         MATCH_TERNARY(is_extract);
         MATCH_BINARY(is_contains);
         MATCH_BINARY(is_at);
+        MATCH_BINARY(is_index);
         MATCH_TERNARY(is_index);
         MATCH_TERNARY(is_replace);
         MATCH_BINARY(is_prefix);
@@ -294,25 +299,30 @@ public:
         app* mk_star(expr* r) { return m.mk_app(m_fid, OP_RE_STAR, r); }
         app* mk_plus(expr* r) { return m.mk_app(m_fid, OP_RE_PLUS, r); }
         app* mk_opt(expr* r) { return m.mk_app(m_fid, OP_RE_OPTION, r); }        
+        app* mk_loop(expr* r, unsigned lo);
+        app* mk_loop(expr* r, unsigned lo, unsigned hi);
 
         bool is_to_re(expr const* n)    const { return is_app_of(n, m_fid, OP_SEQ_TO_RE); }
         bool is_concat(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_CONCAT); }
         bool is_union(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_UNION); }
-        bool is_inter(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_INTERSECT); }
+        bool is_intersection(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_INTERSECT); }
         bool is_star(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_STAR); }
         bool is_plus(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_PLUS); }
         bool is_opt(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_OPTION); }
         bool is_range(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_RANGE); }
-        bool is_loop(expr const* n)    const { return is_app_of(n, m_fid, OP_REGEXP_LOOP); }
-       
+        bool is_loop(expr const* n)    const { return is_app_of(n, m_fid, OP_RE_LOOP); }
+        bool is_empty(expr const* n)  const { return is_app_of(n, m_fid, OP_RE_EMPTY_SET); }
+        bool is_full(expr const* n)  const { return is_app_of(n, m_fid, OP_RE_FULL_SET); }
         MATCH_UNARY(is_to_re);
         MATCH_BINARY(is_concat);
         MATCH_BINARY(is_union);
-        MATCH_BINARY(is_inter);
+        MATCH_BINARY(is_intersection);
+        MATCH_BINARY(is_range);
         MATCH_UNARY(is_star);
         MATCH_UNARY(is_plus);
         MATCH_UNARY(is_opt);
-        
+        bool is_loop(expr const* n, expr*& body, unsigned& lo, unsigned& hi);
+        bool is_loop(expr const* n, expr*& body, unsigned& lo);        
     };
     str str;
     re  re;

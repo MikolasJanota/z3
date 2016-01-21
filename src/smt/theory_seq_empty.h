@@ -26,24 +26,20 @@ namespace smt {
     class seq_factory : public value_factory {
         typedef hashtable<symbol, symbol_hash_proc, symbol_eq_proc> symbol_set;
         ast_manager& m;
-        proto_model& m_model;
         seq_util     u;
         symbol_set   m_strings;
         unsigned     m_next;
-        char         m_char;
-        std::string  m_unique_prefix;
+        std::string  m_unique_delim;
         obj_map<sort, expr*> m_unique_sequences;
         expr_ref_vector m_trail;
     public:
 
-        seq_factory(ast_manager & m, family_id fid, proto_model & md):
+        seq_factory(ast_manager & m, family_id fid):
             value_factory(m, fid),
             m(m),
-            m_model(md),
             u(m),
             m_next(0),
-            m_char(0),
-            m_unique_prefix("#B"),
+            m_unique_delim("!"),
             m_trail(m)
         {
             m_strings.insert(symbol(""));
@@ -56,7 +52,7 @@ namespace smt {
         }
 
         void set_prefix(char const* p) {
-            m_unique_prefix = p;
+            m_unique_delim = p;
         }
 
         // generic method for setting unique sequences
@@ -89,7 +85,7 @@ namespace smt {
             if (u.is_string(s)) {
                 while (true) {
                     std::ostringstream strm;
-                    strm << m_unique_prefix << m_next++;
+                    strm << m_unique_delim << std::hex << m_next++ << std::dec << m_unique_delim;
                     symbol sym(strm.str().c_str());
                     if (m_strings.contains(sym)) continue;
                     m_strings.insert(sym);
@@ -129,7 +125,7 @@ namespace smt {
     public:
         theory_seq_empty(ast_manager& m):theory(m.mk_family_id("seq")), m_used(false) {}
         virtual void init_model(model_generator & mg) {
-            mg.register_factory(alloc(seq_factory, get_manager(), get_family_id(), mg.get_model()));
+            mg.register_factory(alloc(seq_factory, get_manager(), get_family_id()));
         }
 
     };

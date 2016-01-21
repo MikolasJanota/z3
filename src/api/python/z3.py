@@ -536,7 +536,7 @@ class SortRef(AstRef):
 
     def __hash__(self):
         """ Hash code. """
-        AstRef.__hash__(self)
+        return AstRef.__hash__(self)
 
 def is_sort(s):
     """Return `True` if `s` is a Z3 sort.
@@ -802,7 +802,7 @@ class ExprRef(AstRef):
 
     def __hash__(self):
         """ Hash code. """
-        AstRef.__hash__(self)
+        return AstRef.__hash__(self)
 
     def __ne__(self, other):
         """Return a Z3 expression that represents the constraint `self != other`.
@@ -1815,6 +1815,8 @@ def _mk_quantifier(is_forall, vs, body, weight=1, qid="", skid="", patterns=[], 
     if is_app(vs):
         vs = [vs]
     num_vars = len(vs)
+    if num_vars == 0:
+        return body
     _vs = (Ast * num_vars)()
     for i in range(num_vars):
         ## TODO: Check if is constant
@@ -3572,15 +3574,19 @@ def Concat(*args):
     if __debug__:
         _z3_assert(sz >= 2, "At least two arguments expected.")
 
-    ctx = args[0].ctx
-
-    if is_seq(args[0]):
-       if __debug__:
-         _z3_assert(all([is_seq(a) for a in args]), "All arguments must be sequence expressions.")
-       v = (Ast * sz)()
-       for i in range(sz):
+    ctx = None
+    for a in args:
+        if is_expr(a):
+            ctx = a.ctx
+            break
+    if is_seq(args[0]) or isinstance(args[0], str):
+        args = [_coerce_seq(s, ctx) for s in args]
+        if __debug__:
+            _z3_assert(all([is_seq(a) for a in args]), "All arguments must be sequence expressions.")
+        v = (Ast * sz)()
+        for i in range(sz):
             v[i] = args[i].as_ast()
-       return SeqRef(Z3_mk_seq_concat(ctx.ref(), sz, v), ctx)
+        return SeqRef(Z3_mk_seq_concat(ctx.ref(), sz, v), ctx)
 
     if is_re(args[0]):
        if __debug__:
@@ -9066,7 +9072,12 @@ class SeqRef(ExprRef):
     def __add__(self, other):
         return Concat(self, other)
 
+    def __radd__(self, other):
+        return Concat(other, self)
+
     def __getitem__(self, i):
+        if _is_int(i):
+            i = IntVal(i, self.ctx)
         return SeqRef(Z3_mk_seq_at(self.ctx_ref(), self.as_ast(), i.as_ast()), self.ctx)
 
     def is_string(self):
@@ -9084,6 +9095,10 @@ def _coerce_seq(s, ctx=None):
     if isinstance(s, str):
         ctx = _get_ctx(ctx)
         s = StringVal(s, ctx)
+    if not is_expr(s):
+        raise Z3Exception("Non-expression passed as a sequence")
+    if not is_seq(s):
+        raise Z3Exception("Non-sequence passed as a sequence")
     return s
 
 def _get_ctx2(a, b, ctx=None):
@@ -9309,8 +9324,10 @@ def Union(*args):
     args = _get_args(args)
     sz = len(args)
     if __debug__:
-        _z3_assert(sz >= 2, "At least two arguments expected.")
+        _z3_assert(sz > 0, "At least one argument expected.")
         _z3_assert(all([is_re(a) for a in args]), "All arguments must be regular expressions.")
+    if sz == 1:
+        return args[0]
     ctx = args[0].ctx
     v = (Ast * sz)()
     for i in range(sz):

@@ -105,6 +105,8 @@ public:
     // create an automaton from initial state, final states, and moves
     automaton(M& m, unsigned init, unsigned_vector const& final, moves const& mvs): m(m) {
         m_init = init;
+        m_delta.push_back(moves());
+        m_delta_inv.push_back(moves());
         for (unsigned i = 0; i < final.size(); ++i) {
             add_to_final_states(final[i]);
         }
@@ -151,7 +153,7 @@ public:
         m_final_states(other.m_final_states)
     {}
 
-    // create the automaton that accepts the empty string only.
+    // create the automaton that accepts the empty string/sequence only.
     static automaton* mk_epsilon(M& m) {
         moves mvs;
         unsigned_vector final;
@@ -168,10 +170,24 @@ public:
         return alloc(automaton, m, 0, final, mvs);
     }
 
+    static automaton* clone(automaton const& a) {
+        moves mvs;
+        unsigned_vector final;
+        append_moves(0, a, mvs);
+        append_final(0, a, final);
+        return alloc(automaton, a.m, a.init(), final, mvs);
+    }
+
     // create the sum of disjoint automata
     static automaton* mk_union(automaton const& a, automaton const& b) {
         SASSERT(&a.m == &b.m);
         M& m = a.m;
+        if (a.is_empty()) {
+            return clone(b);
+        }
+        if (b.is_empty()) {
+            return clone(a);
+        }
         moves mvs;
         unsigned_vector final;
         unsigned offset1 = 1;
@@ -196,6 +212,10 @@ public:
             init = 0;
             mvs.push_back(move(m, 0, a.init() + offset));
         }
+        if (a.is_empty()) {
+            return clone(a);
+        }
+
         mvs.push_back(move(m, init, a.final_state() + offset));
         append_moves(offset, a, mvs);
         append_final(offset, a, final);
@@ -206,6 +226,19 @@ public:
     static automaton* mk_concat(automaton const& a, automaton const& b) {
         SASSERT(&a.m == &b.m);
         M& m = a.m;
+        if (a.is_empty()) {
+            return clone(a);
+        }
+        if (b.is_empty()) {
+            return clone(b);
+        }
+        if (a.is_epsilon()) {
+            return clone(b);
+        }
+        if (b.is_epsilon()) {
+            return clone(a);
+        }
+
         moves mvs;
         unsigned_vector final;
         unsigned init = 0;
@@ -295,7 +328,12 @@ public:
     // src - e -> dst - ET -> Dst1 => src - ET -> Dst1  if in_degree(dst) = 1, src != dst
     // Src - E -> dst - et -> dst1 => Src - et -> dst1  if out_degree(dst) = 1, src != dst
     // 
+    // Some missing: 
+    //  src - et -> dst - E -> Dst1 => src - et -> Dst1   if in_degree(dst) = 1
+    //  Src - ET -> dst - e -> dst1 => Src - ET -> dst1  if out_degree(dst) = 1, 
+    //
     void compress() {
+        SASSERT(!m_delta.empty());
         for (unsigned i = 0; i < m_delta.size(); ++i) {
             for (unsigned j = 0; j < m_delta[i].size(); ++j) {
                 move const& mv = m_delta[i][j];
@@ -384,6 +422,7 @@ public:
                 }
             }
         }
+        SASSERT(!m_delta.empty());
         while (true) {
             SASSERT(!m_delta.empty());
             unsigned src = m_delta.size() - 1;            
@@ -446,6 +485,7 @@ public:
     }
 
     bool is_empty() const { return m_final_states.empty(); }
+    bool is_epsilon() const { return m_final_states.size() == 1 && m_final_states.back() == init() && m_delta.empty(); }
     unsigned final_state() const { return m_final_states[0]; }
     bool has_single_final_sink() const { return m_final_states.size() == 1 && m_delta[final_state()].empty(); }
     unsigned num_states() const { return m_delta.size(); }
@@ -507,8 +547,16 @@ private:
 
 
     void add(move const& mv) {
-        m_delta[mv.src()].push_back(mv);
-        m_delta_inv[mv.dst()].push_back(mv);
+        if (!is_duplicate_cheap(mv)) {
+            m_delta[mv.src()].push_back(mv);
+            m_delta_inv[mv.dst()].push_back(mv);
+        }
+    }
+
+    bool is_duplicate_cheap(move const& mv) const {
+        if (m_delta[mv.src()].empty()) return false;
+        move const& mv0 = m_delta[mv.src()].back();
+        return mv0.src() == mv.src() && mv0.dst() == mv.dst() && mv0.t() == mv.t();
     }
 
 
