@@ -30,7 +30,7 @@ void bv_bounds::add_constraint(expr* e) {
     if (m_bv_util.is_bv_sle(e, lhs, rhs)) {
         numeral val;
         unsigned bv_sz = m_bv_util.get_bv_size(lhs);
-        SASSERT(bv_sz > 1);
+        //TODO(bv_sz == 1)
         if (bv_sz == 1) return;
         const numeral middle = rational::power_of_two(bv_sz - 1);
         if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
