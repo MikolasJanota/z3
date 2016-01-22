@@ -34,6 +34,8 @@ Notes:
 #include"var_subst.h"
 #include"ast_util.h"
 #include"well_sorted.h"
+#include"bv_bounds.h"
+
 
 struct th_rewriter_cfg : public default_rewriter_cfg {
     bool_rewriter       m_b_rw;
@@ -189,6 +191,15 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 if (st != BR_FAILED)
                     return st;
             }
+            if (k == OP_AND && num < 10) {
+                bv_bounds bvb(m());
+                for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
+                if (!bvb.is_sat()) {
+                    result = m().mk_false();
+                    return BR_REWRITE2;
+                }
+            }
+
             return m_b_rw.mk_app_core(f, num, args, result);
         }
         if (fid == m_a_rw.get_fid())
