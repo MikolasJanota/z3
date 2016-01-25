@@ -68,12 +68,14 @@ inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
 }
 
 inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val) {
-    if (is_uninterp_const(v)) {
+    SASSERT(e && !v);
+    SASSERT(m_bv_util.get_bv_size(e) == bv_sz);
+    if (is_uninterp_const(e)) {
         v = to_app(e);
         val = rational(0);
         return true;
     }
-    expr *lhs, *rhs;
+    expr *lhs(NULL), *rhs(NULL);
     if (!m_bv_util.is_bv_add(e, lhs, rhs)) return false;
     if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) {
         v = to_app(lhs);
@@ -83,6 +85,7 @@ inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numera
         v = to_app(rhs);
         return true;
     }
+    return false;
 }
 
 
