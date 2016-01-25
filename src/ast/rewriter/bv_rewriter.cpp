@@ -2085,6 +2085,24 @@ br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
     return BR_FAILED;
 }
 
+bool bv_rewriter::has_bound_u(expr * e, numeral& l, numeral& h) {
+    unsigned sz;
+    if (is_numeral(e, l, sz)) {
+        h = l;
+        return true;
+    }
+    expr * s;
+    expr * t;
+    if (m_util.is_bv_uremi(e, s, t) || m_util.is_bv_urem(e, s, t)) {
+        if (is_numeral(t, h, sz)) {
+            h = h - numeral(1);
+            l = numeral(0);
+            return true;
+        }
+    }
+    return false;
+}
+
 br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     if (lhs == rhs) {
         result = m().mk_true();
@@ -2129,6 +2147,16 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
 
     expr_ref new_lhs(m());
     expr_ref new_rhs(m());
+
+    {
+        numeral ll, lh, rl, rh;
+        if (has_bound_u(lhs, ll, lh) && has_bound_u(rhs, rl, rh)) {
+            if (ll > rh || rl > lh) {
+                result = m().mk_false();
+                return BR_DONE;
+            }
+        }
+    }
 
     if (m_util.is_bv_add(lhs) || m_util.is_bv_mul(lhs) || m_util.is_bv_add(rhs) || m_util.is_bv_mul(rhs)) {
         st = cancel_monomials(lhs, rhs, false, new_lhs, new_rhs);
