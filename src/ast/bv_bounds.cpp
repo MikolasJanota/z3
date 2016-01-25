@@ -47,25 +47,13 @@ bool bv_bounds::add_constraint(expr* e) {
             const numeral mod = rational::power_of_two(bv_sz);
             return add_bound_unsigned(to_app(rhs), mod - val, mod - rational(1), negated);
         }
-    }
 
-    if (m_bv_util.is_bv_sle(e, lhs, rhs)) { 
-        unsigned bv_sz = m_bv_util.get_bv_size(lhs);
-        // signed inequality with one variable and a constant
-        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
-            val = m_bv_util.norm(val, bv_sz, true);
-            return add_bound_signed(to_app(lhs), -rational::power_of_two(bv_sz - 1), val, negated);
-        }
-        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
-            val = m_bv_util.norm(val, bv_sz, true);
-            return add_bound_signed(to_app(rhs), val, rational::power_of_two(bv_sz - 1) - rational(1), negated);
-        }
-
-        app * v1(NULL), * v2(NULL);
+        app * v1(NULL), *v2(NULL);
         numeral val1, val2;
         if (is_constant_add(bv_sz, lhs, v1, val1)
             && is_constant_add(bv_sz, rhs, v2, val2)
             && v1 == v2) {
+            //std::cout << __LINE__ << "\n";
             if (val1 == val2) return m_okay;
             const numeral mod = rational::power_of_two(bv_sz);
             if (val1 < val2) {
@@ -79,6 +67,19 @@ bool bv_bounds::add_constraint(expr* e) {
                 SASSERT(val1 > rational(0));
                 return add_bound_unsigned(v1, mod - val1, mod - val2 - rational(1), negated);
             }
+        }
+    }
+
+    if (m_bv_util.is_bv_sle(e, lhs, rhs)) { 
+        unsigned bv_sz = m_bv_util.get_bv_size(lhs);
+        // signed inequality with one variable and a constant
+        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
+            val = m_bv_util.norm(val, bv_sz, true);
+            return add_bound_signed(to_app(lhs), -rational::power_of_two(bv_sz - 1), val, negated);
+        }
+        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
+            val = m_bv_util.norm(val, bv_sz, true);
+            return add_bound_signed(to_app(rhs), val, rational::power_of_two(bv_sz - 1) - rational(1), negated);
         }
     }
 
