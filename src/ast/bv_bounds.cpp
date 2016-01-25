@@ -10,88 +10,132 @@
 
  Author:
 
- Mikolas Janota
+ Mikolas Janota (MikolasJanota)
 
  Revision History:
 --*/
 #include "bv_bounds.h"
 #include"ast_smt2_pp.h"
 
-void bv_bounds::add_constraint(expr* e) {
+bool bv_bounds::add_constraint(expr* e) {
     TRACE("bv_bounds", tout << "new constraint" << mk_ismt2_pp(e, m_m) << std::endl;);
+    if (!m_okay) return false;
+
+    bool negated = false;
+    if (m_m.is_not(e)) {
+        negated = true;
+        e = to_app(e)->get_arg(0);
+    }
+
     expr *lhs, *rhs;
+    numeral val;
+
     if (m_bv_util.is_bv_ule(e, lhs, rhs)) {
-        numeral val;
         unsigned bv_sz = m_bv_util.get_bv_size(lhs);
-        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) bound_lo(to_app(lhs), val);
-        else if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) bound_up(to_app(rhs), val);
-    }
+        // unsigned inequality with one variable and a constant
+        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) // v <= val
+            return add_bound_unsigned(to_app(lhs), rational(0), val, negated);
+        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) // val <= v
+            return add_bound_unsigned(to_app(rhs), val, rational::power_of_two(bv_sz) - rational(1), negated);
 
-    if (m_bv_util.is_bv_sle(e, lhs, rhs)) {
-        numeral val;
-        unsigned bv_sz = m_bv_util.get_bv_size(lhs);
-        //TODO(bv_sz == 1)
-        if (bv_sz == 1) return;
-        const numeral middle = rational::power_of_two(bv_sz - 1);
-        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
-            app * const v = to_app(lhs);
-            if (val >= middle) { // val < 0
-                bound_lo(v, middle);
-                bound_up(v, val);
-            }
-            else { // val >= 0
-                interval ni;
-                ni.first = val + numeral(1);
-                ni.second = middle - numeral(1);
-                if (ni.first<=ni.second) neg_bound(v, ni);
-            }
+        // unsigned inequality with one variable, constant, and addition
+        expr *t1, *t2;
+        if (m_bv_util.is_bv_add(lhs, t1, t2)
+            && m_bv_util.is_numeral(t1, val, bv_sz)
+            && is_uninterp_const(t2)
+            && t2 == rhs) {  // val + v <= v
+            const numeral mod = rational::power_of_two(bv_sz);
+            return add_bound_unsigned(to_app(rhs), mod - val, mod - rational(1), negated);
         }
-        else if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
-                app * const v = to_app(rhs);
-                if (val >= middle) { // val < 0
-                    interval ni;
-                    ni.first = middle;
-                    ni.second = val - numeral(1);
-                    if (ni.first <= ni.second) neg_bound(v, ni);
-
-                }
-                else { // val >= 0
-                    bound_up(v, middle - numeral(1));
-                    bound_lo(v, val);
-                }
-            }
     }
 
+    if (m_bv_util.is_bv_sle(e, lhs, rhs)) { 
+        unsigned bv_sz = m_bv_util.get_bv_size(lhs);
+        // signed inequality with one variable and a constant
+        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
+            val = m_bv_util.norm(val, bv_sz, true);
+            return add_bound_signed(to_app(lhs), -rational::power_of_two(bv_sz - 1), val, negated);
+        }
+        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
+            val = m_bv_util.norm(val, bv_sz, true);
+            return add_bound_signed(to_app(rhs), val, rational::power_of_two(bv_sz - 1) - rational(1), negated);
+        }
+    }
+
+    return true;
+}
+
+bool bv_bounds::add_bound_unsigned(app * v, numeral a, numeral b, bool negate) {
+    TRACE("bv_bounds", tout << "bound_unsigned " << mk_ismt2_pp(v, m_m) << ":" << (negate ? "~" : " ") << a << ";" << b << std::endl;);
+    const unsigned bv_sz = m_bv_util.get_bv_size(v);
+    SASSERT(rational(0) <= a);
+    SASSERT(a <= b);
+    SASSERT(b < rational::power_of_two(bv_sz));
+    const bool a_min = a == rational(0);
+    const bool b_max = b == (rational::power_of_two(bv_sz) - rational(1));
+    if (negate) {
+        if (a_min && b_max) return m_okay = false;
+        if (a_min) return bound_lo(v, b + rational(1));
+        if (b_max) return bound_up(v, a - rational(1));
+        return add_neg_bound(v, a, b);
+    }
+    else {
+        if (!a_min) m_okay &= bound_lo(v, a);
+        if (!b_max) m_okay &= bound_up(v, b);
+        return m_okay;
+    }
+}
+
+bool bv_bounds::add_bound_signed(app * v, numeral a, numeral b, bool negate) {
+    TRACE("bv_bounds", tout << "bound_signed " << mk_ismt2_pp(v, m_m) << ":" << (negate ? "~" : " ") << a << ";" << b << std::endl;);
+    const unsigned bv_sz = m_bv_util.get_bv_size(v);
+    SASSERT(a <= b);
+    const bool a_neg = a < rational(0);
+    const bool b_neg = b < rational(0);
+    if (!a_neg && !b_neg) return add_bound_unsigned(v, a, b, negate);
+    const numeral mod = rational::power_of_two(bv_sz);
+    if (a_neg && b_neg) return add_bound_unsigned(v, mod + a, mod + b, negate);
+    SASSERT(a_neg && !b_neg);
+    if (negate) {
+        return add_bound_unsigned(v, mod + a, mod - rational(1), true)
+            && add_bound_unsigned(v, rational(0), b, true);
+    }
+    else {
+        const numeral l = b + rational(1);
+        const numeral u = mod + a - rational(1);
+        return (l <= u) ? add_bound_unsigned(v, l, u, true) : true;
+    }
 }
 
 bool bv_bounds::bound_lo(app * v, numeral l) {
-    SASSERT(l >= numeral(0));
+    SASSERT(in_range(v, l));
     TRACE("bv_bounds", tout << "lower " << mk_ismt2_pp(v, m_m) << ":" << l << std::endl;);
     // l <= v
     bound_map::obj_map_entry * const entry = m_unsigned_lowers.insert_if_not_there2(v, l);
-    if (!(entry->get_data().m_value < l)) return false;
+    if (!(entry->get_data().m_value < l)) return true;
     // improve bound
     entry->get_data().m_value = l;
     return true;
 }
 
 bool bv_bounds::bound_up(app * v, numeral u) {
-    SASSERT(u >= numeral(0));
+    SASSERT(in_range(v, u));
     TRACE("bv_bounds", tout << "upper " << mk_ismt2_pp(v, m_m) << ":" << u << std::endl;);
     // v <= u
     bound_map::obj_map_entry * const entry = m_unsigned_uppers.insert_if_not_there2(v, u);
-    if (!(u < entry->get_data().m_value)) return false;
+    if (!(u < entry->get_data().m_value)) return true;
     // improve bound
     entry->get_data().m_value = u;
     return true;
 }
 
-void bv_bounds::neg_bound(app * v, const bv_bounds::interval& negative_interval) {
-    TRACE("bv_bounds", tout << "negative bound " << mk_ismt2_pp(v, m_m) << ":" << negative_interval.first<<"-"<< negative_interval.second << std::endl;);
+bool bv_bounds::add_neg_bound(app * v, numeral a, numeral b) {
+    TRACE("bv_bounds", tout << "negative bound " << mk_ismt2_pp(v, m_m) << ":" << a << ";" << b << std::endl;);
+    bv_bounds::interval negative_interval(a, b);
     SASSERT(m_bv_util.is_bv(v));
-    SASSERT(negative_interval.first >= rational(0));
-    SASSERT(negative_interval.second < rational::power_of_two(m_bv_util.get_bv_size(v)));
-    SASSERT(negative_interval.first <= negative_interval.second);
+    SASSERT(a >= rational(0));
+    SASSERT(b < rational::power_of_two(m_bv_util.get_bv_size(v)));
+    SASSERT(a <= b);
 
     intervals_map::obj_map_entry * const e = m_negative_intervals.find_core(v);
     intervals * ivs(NULL);
@@ -103,10 +147,12 @@ void bv_bounds::neg_bound(app * v, const bv_bounds::interval& negative_interval)
         ivs = e->get_data().get_value();
     }
     ivs->push_back(negative_interval);
+    return true;
 }
 
 
 bool bv_bounds::is_sat() {
+    if (!m_okay) return false;
     obj_hashtable<app>   seen;
     obj_hashtable<app>::entry *dummy;
 
@@ -140,6 +186,7 @@ struct interval_comp_t {
 bool bv_bounds::is_sat(app * v) {
     TRACE("bv_bounds", tout << "is_sat " << mk_ismt2_pp(v, m_m) << std::endl;);
     SASSERT(m_bv_util.is_bv(v));
+    if (!m_okay) return false;
     func_decl * const d = v->get_decl();
     unsigned const bv_sz = m_bv_util.get_bv_size(v);
     numeral lower, upper;
