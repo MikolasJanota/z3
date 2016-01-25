@@ -18,7 +18,6 @@
 #include"ast_smt2_pp.h"
 
 bool bv_bounds::add_constraint(expr* e) {
-    //std::cout << __LINE__ << "\n";
     TRACE("bv_bounds", tout << "new constraint" << mk_ismt2_pp(e, m_m) << std::endl;);
     if (!m_okay) return false;
 
@@ -61,9 +60,29 @@ bool bv_bounds::add_constraint(expr* e) {
             val = m_bv_util.norm(val, bv_sz, true);
             return add_bound_signed(to_app(rhs), val, rational::power_of_two(bv_sz - 1) - rational(1), negated);
         }
+
+        app * v1(NULL), * v2(NULL);
+        numeral val1, val2;
+        if (is_constant_add(bv_sz, lhs, v1, val1)
+            && is_constant_add(bv_sz, rhs, v2, val2)
+            && v1 == v2) {
+            if (val1 == val2) return m_okay;
+            const numeral mod = rational::power_of_two(bv_sz);
+            if (val1 < val2) {
+                SASSERT(val1 < (mod - rational(1)));
+                SASSERT(val2 > rational(0));
+                return add_bound_unsigned(v1, mod - val2, mod - val1 - rational(1), !negated);
+            }
+            else {
+                SASSERT(val1 > val2);
+                SASSERT(val2 < (mod - rational(1)));
+                SASSERT(val1 > rational(0));
+                return add_bound_unsigned(v1, mod - val1, mod - val2 - rational(1), negated);
+            }
+        }
     }
 
-    return true;
+    return m_okay;
 }
 
 bool bv_bounds::add_bound_unsigned(app * v, numeral a, numeral b, bool negate) {
@@ -104,7 +123,7 @@ bool bv_bounds::add_bound_signed(app * v, numeral a, numeral b, bool negate) {
     else {
         const numeral l = b + rational(1);
         const numeral u = mod + a - rational(1);
-        return (l <= u) ? add_bound_unsigned(v, l, u, true) : true;
+        return (l <= u) ? add_bound_unsigned(v, l, u, true) : m_okay;
     }
 }
 
@@ -113,10 +132,10 @@ bool bv_bounds::bound_lo(app * v, numeral l) {
     TRACE("bv_bounds", tout << "lower " << mk_ismt2_pp(v, m_m) << ":" << l << std::endl;);
     // l <= v
     bound_map::obj_map_entry * const entry = m_unsigned_lowers.insert_if_not_there2(v, l);
-    if (!(entry->get_data().m_value < l)) return true;
+    if (!(entry->get_data().m_value < l)) return m_okay;
     // improve bound
     entry->get_data().m_value = l;
-    return true;
+    return m_okay;
 }
 
 bool bv_bounds::bound_up(app * v, numeral u) {
@@ -124,10 +143,10 @@ bool bv_bounds::bound_up(app * v, numeral u) {
     TRACE("bv_bounds", tout << "upper " << mk_ismt2_pp(v, m_m) << ":" << u << std::endl;);
     // v <= u
     bound_map::obj_map_entry * const entry = m_unsigned_uppers.insert_if_not_there2(v, u);
-    if (!(u < entry->get_data().m_value)) return true;
+    if (!(u < entry->get_data().m_value)) return m_okay;
     // improve bound
     entry->get_data().m_value = u;
-    return true;
+    return m_okay;
 }
 
 bool bv_bounds::add_neg_bound(app * v, numeral a, numeral b) {
@@ -148,7 +167,7 @@ bool bv_bounds::add_neg_bound(app * v, numeral a, numeral b) {
         ivs = e->get_data().get_value();
     }
     ivs->push_back(negative_interval);
-    return true;
+    return m_okay;
 }
 
 
