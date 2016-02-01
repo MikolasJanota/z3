@@ -22,29 +22,40 @@
 #include"ast.h"
 #include"bv_decl_plugin.h"
 
-/* 
- * All bounds/intervals are closed. Methods that add new constraints 
- * return false if inconsistency has already been reached.  
- * Typical usage is to call add_constraint(e) repeatedly and call is_sat() in the end.  
+/* \brief A class to analyze constraints on bit vectors.
+
+  The objective is to identify inconsistencies in polynomial time.
+  All bounds/intervals are closed. Methods that add new constraints
+  return false if inconsistency has already been reached.
+  Typical usage is to call repeatedly add_constraint(e) and call is_sat() in the end.  
  */
 class bv_bounds {
 public:
     typedef rational numeral;
     typedef std::pair<numeral, numeral> interval;
     bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {};
+    ~bv_bounds();
 public: // bounds addition methods
+    /** \brief Add a constraint to the system.
+
+       The added constraints are to be considered by is_sat.
+       Currently, only special types of inequalities are supported, e.g. v <= v+1.
+       Other constraints are ignored.
+       Returns false if the system became trivially unsatisfiable
+    **/
+    bool add_constraint(expr* e);
+
     bool bound_up(app * v, numeral u); // v <= u
     bool bound_lo(app * v, numeral l); // l <= v
     inline bool add_neg_bound(app * v, numeral a, numeral b); // not (a<=v<=b)
     bool add_bound_signed(app * v, numeral a, numeral b, bool negate);
-    bool add_bound_unsigned(app * v,  numeral a, numeral b, bool negate);
-    bool add_constraint(expr* e); // identify special types of expressions to determine bounds
+    bool add_bound_unsigned(app * v, numeral a, numeral b, bool negate);
 public:
-    bool is_sat();
+    bool is_sat();  ///< Determine if the set of considered constraints is satisfiable.
     bool is_okay();
 protected:
     typedef vector<interval>            intervals;
-    typedef obj_map<app, intervals*>    intervals_map; 
+    typedef obj_map<app, intervals*>    intervals_map;
     typedef obj_map<app, numeral>       bound_map;
     ast_manager&              m_m;
     bound_map                 m_unsigned_lowers;

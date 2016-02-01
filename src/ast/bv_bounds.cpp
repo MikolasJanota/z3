@@ -17,6 +17,12 @@
 #include "bv_bounds.h"
 #include"ast_smt2_pp.h"
 
+bv_bounds::~bv_bounds() {
+    intervals_map::iterator it = m_negative_intervals.begin();
+    const intervals_map::iterator end = m_negative_intervals.end();
+    for (; it != end; ++it) dealloc(it->m_value);
+}
+
 bool bv_bounds::add_constraint(expr* e) {
     TRACE("bv_bounds", tout << "new constraint" << mk_ismt2_pp(e, m_m) << std::endl;);
     if (!m_okay) return false;
