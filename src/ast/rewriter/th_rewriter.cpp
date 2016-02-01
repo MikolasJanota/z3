@@ -196,7 +196,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
                 if (!bvb.is_sat()) {
                     result = m().mk_false();
-                    return BR_REWRITE2;
+                    return BR_DONE;
                 }
             }
 
