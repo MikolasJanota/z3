@@ -84,21 +84,12 @@ struct miner::imp {
         }
     }
 
-    inline bool is_val(const expr * e) {
-        if (!is_app(e)) return false;
-        return is_val_ap(to_app(e));
-    }
-
-    inline bool is_val_ap(const app * a) const {
-        const family_id fid = a->get_decl()->get_family_id();
-        const bool rv = fid != null_family_id && a->get_num_args() == 0;
-        return rv;
-    }
+    inline bool is_val(expr * a) const { return m_m.is_value(a); }
 
     bool test_term(app * term, expr_ref& value) {
         SASSERT(term);
         if (term->get_depth() > 5) return false; //TODO: introduce a parameter
-        if (is_val_ap(term)) return false;
+        if (is_val(term)) return false;
         expr_ref value1(m_m);
         m_evaluators[0]->operator() (term, value);
         for (unsigned i = 1; i < m_evaluators.size(); i++) {
