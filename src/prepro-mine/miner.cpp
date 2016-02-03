@@ -26,17 +26,22 @@
 #include"tactic.h"
 #include"solver.h"
 
+#define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
+
 struct miner::imp {
     ast_manager&                   m_m;
     vector<model_ref>              m_assignments;
     ptr_vector<model_evaluator>    m_evaluators;
     decl_collector*                m_collector;
     bool                           m_print;
+    bv_util                        m_bv_util;
 
     imp(ast_manager & m)
         : m_m(m)
         , m_collector(NULL)
-        , m_print(false) {}
+        , m_print(false)
+        , m_bv_util(m)
+    {}
 
     ~imp() { cleanup(); }
 
@@ -86,6 +91,45 @@ struct miner::imp {
 
     inline bool is_val(expr * a) const { return m_m.is_value(a); }
 
+
+    bool find_upper_bound(app * term, rational& h) {
+        SASSERT(term);
+        if (term->get_depth() > 5) return false; //TODO: introduce a parameter
+        if (is_val(term)) return false;
+        if (!m_bv_util.is_bv(term)) return false;
+        const unsigned bv_sz = m_bv_util.get_bv_size(term);
+        const rational max = rational::power_of_two(bv_sz) - rational(1);
+        h = max;
+        rational l = rational(0);
+        expr_ref mid_e(m_m);
+        expr_ref query(m_m);
+        query = m_m.mk_eq(term, m_bv_util.mk_numeral(h, bv_sz));
+        if (decide(query) != l_false) return false;
+        --h;
+        while (l < h) {
+            std::cout << mk_ismt2_pp(term, m_m, 2) << " lh:" << l << " " << h << "\n";
+            const rational mid_v = l + ceil((h - l) / rational(2));
+            //std::cout << "mid_v:" << mid_v << "\n";
+            mid_e = m_bv_util.mk_numeral(mid_v, bv_sz);
+            query = m_bv_util.mk_ule(mid_e.get(), term);
+            const lbool t = decide(query);
+            switch (t)
+            {
+            case l_true:  l = mid_v; break;
+            case l_false: h = mid_v - rational(1); break;
+            case l_undef: return false;
+            default:
+                UNREACHABLE();
+                break;
+            }
+        }
+        SASSERT(l == h);
+        const bool interesting = h < max;
+        if (m_print && interesting)
+            std::cout << "bound: " << mk_ismt2_pp(term, m_m, 2) << "->" << h << "\n";
+        return interesting;
+    }
+
     bool test_term(app * term, expr_ref& value) {
         SASSERT(term);
         if (term->get_depth() > 5) return false; //TODO: introduce a parameter
@@ -111,6 +155,7 @@ struct miner::imp {
         expr_mark        visited;
         stack.push_back(f.get());
         expr_ref         constant_value(m_m);
+        rational         upper_bound;
 
         while (!stack.empty()) {
             curr = stack.back();
@@ -132,7 +177,8 @@ struct miner::imp {
                                                a->get_num_args(), a->get_args())) {
                             visited.mark(a, true);
                             stack.pop_back();
-                            test_term(a, constant_value);
+                            const bool c = test_term(a, constant_value);
+                            find_upper_bound(a, upper_bound);
                         }
                     }
                     break;
