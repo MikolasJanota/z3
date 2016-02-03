@@ -178,7 +178,7 @@ struct miner::imp {
                             visited.mark(a, true);
                             stack.pop_back();
                             const bool c = test_term(a, constant_value);
-                            find_upper_bound(a, upper_bound);
+                            if (!c) find_upper_bound(a, upper_bound);
                         }
                     }
                     break;
