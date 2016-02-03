@@ -56,6 +56,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     bool                m_cache_all;
     bool                m_push_ite_arith;
     bool                m_push_ite_bv;
+    unsigned            m_bv_ineq_consistency_test_max;
 
     // substitution support
     expr_dependency_ref m_used_dependencies; // set of dependencies of used substitutions
@@ -72,6 +73,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_cache_all      = p.cache_all();
         m_push_ite_arith = p.push_ite_arith();
         m_push_ite_bv    = p.push_ite_bv();
+        m_bv_ineq_consistency_test_max = p.bv_ineq_consistency_test_max();
     }
         
     void updt_params(params_ref const & p) {
@@ -191,7 +193,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 if (st != BR_FAILED)
                     return st;
             }
-            if (k == OP_AND && num < 10) {
+            if (k == OP_AND && num < m_bv_ineq_consistency_test_max) {
                 bv_bounds bvb(m());
                 for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
                 if (!bvb.is_sat()) {
