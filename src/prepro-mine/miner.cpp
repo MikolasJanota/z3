@@ -126,9 +126,48 @@ struct miner::imp {
         SASSERT(l == h);
         const bool interesting = h < max;
         if (m_print && interesting)
-            std::cout << "bound: " << mk_ismt2_pp(term, m_m, 2) << "->" << h << "\n";
+            std::cout << "ubound: " << mk_ismt2_pp(term, m_m, 2) << "->" << h << "\n";
         return interesting;
     }
+
+	bool find_lower_bound(app * term, rational& l) {
+		SASSERT(term);
+		if (term->get_depth() > 5) return false; //TODO: introduce a parameter
+		if (is_val(term)) return false;
+		if (!m_bv_util.is_bv(term)) return false;
+		const unsigned bv_sz = m_bv_util.get_bv_size(term);
+		const rational max = rational::power_of_two(bv_sz) - rational(1);
+		rational h = max;
+		l = rational(0);
+		expr_ref mid_e(m_m);
+		expr_ref query(m_m);
+		query = m_m.mk_eq(term, m_bv_util.mk_numeral(l, bv_sz));
+		if (decide(query) != l_false) return false;
+		++l;
+		while (l < h) {
+			std::cout << mk_ismt2_pp(term, m_m, 2) << " lh:" << l << " " << h << "\n";
+			const rational mid_v = l + floor((h - l) / rational(2));
+			//std::cout << "mid_v:" << mid_v << "\n";
+			mid_e = m_bv_util.mk_numeral(mid_v, bv_sz);
+			query = m_bv_util.mk_ule(term, mid_e.get());
+			const lbool t = decide(query);
+			switch (t)
+			{
+			case l_true:  h = mid_v; break;
+			case l_false: l = mid_v + rational(1); break;
+			case l_undef: return false;
+			default:
+				UNREACHABLE();
+				break;
+			}
+		}
+		SASSERT(l == h);
+		const bool interesting = rational(0) < l;
+		if (m_print && interesting)
+			std::cout << "lbound: " << mk_ismt2_pp(term, m_m, 2) << "->" << l << "\n";
+		return interesting;
+	}
+
 
     bool test_term(app * term, expr_ref& value) {
         SASSERT(term);
@@ -156,6 +195,7 @@ struct miner::imp {
         stack.push_back(f.get());
         expr_ref         constant_value(m_m);
         rational         upper_bound;
+		rational         lower_bound;
 
         while (!stack.empty()) {
             curr = stack.back();
@@ -178,7 +218,10 @@ struct miner::imp {
                             visited.mark(a, true);
                             stack.pop_back();
                             const bool c = test_term(a, constant_value);
-                            if (!c) find_upper_bound(a, upper_bound);
+							const bool u = !c && find_upper_bound(a, upper_bound);
+							const bool l = !c && find_lower_bound(a, lower_bound);
+							if (u || l) 
+								std::cout << "u-l: " << mk_ismt2_pp(a, m_m, 2) << "->" << (upper_bound - lower_bound) << "\n";
                         }
                     }
                     break;
