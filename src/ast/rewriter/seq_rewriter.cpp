@@ -875,6 +875,10 @@ br_status seq_rewriter::mk_str_in_regexp(expr* a, expr* b, expr_ref& result) {
                     if (m().is_false(cond)) {
                         continue;
                     }
+                    if (m().is_true(cond)) {
+                        add_next(next, trail, mv.dst(), acc);
+                        continue;
+                    }
                     expr* args[2] = { cond, acc };
                     cond = mk_and(m(), 2, args);
                     add_next(next, trail, mv.dst(), cond);
@@ -1484,6 +1488,7 @@ bool seq_rewriter::length_constrained(unsigned szl, expr* const* l, unsigned szr
         if (is_sat) {
             lhs.push_back(concat_non_empty(szl, l));
             rhs.push_back(concat_non_empty(szr, r));
+            //split_units(lhs, rhs);
         }
         return true;
     }
@@ -1492,12 +1497,38 @@ bool seq_rewriter::length_constrained(unsigned szl, expr* const* l, unsigned szr
         if (is_sat) {
             lhs.push_back(concat_non_empty(szl, l));
             rhs.push_back(concat_non_empty(szr, r));
+            //split_units(lhs, rhs);
         }
         return true;
-    }
-    
+    }    
     return false;
 }
+
+void seq_rewriter::split_units(expr_ref_vector& lhs, expr_ref_vector& rhs) {
+    expr* a, *b, *a1, *b1, *a2, *b2;
+    while (true) {
+        if (m_util.str.is_unit(lhs.back(), a) &&
+            m_util.str.is_unit(rhs.back(), b)) {
+            lhs[lhs.size()-1] = a;
+            rhs[rhs.size()-1] = b;
+            break;
+        }
+        if (m_util.str.is_concat(lhs.back(), a, a2) && 
+            m_util.str.is_unit(a, a1) && 
+            m_util.str.is_concat(rhs.back(), b, b2) &&
+            m_util.str.is_unit(b, b1)) {
+            expr_ref _pin_a(lhs.back(), m()), _pin_b(rhs.back(), m());
+            lhs[lhs.size()-1] = a1;
+            rhs[rhs.size()-1] = b1;
+            lhs.push_back(a2);
+            rhs.push_back(b2);
+        }
+        else {
+            break;
+        }
+    }
+}
+
 
 bool seq_rewriter::is_epsilon(expr* e) const {
     expr* e1;
