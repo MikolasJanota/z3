@@ -26,13 +26,15 @@ Notes:
 #include"bv_size_reduction_tactic.h"
 #include"reduce_args_tactic.h"
 #include"qfbv_tactic.h"
+#include"bv_bound_chk_tactic.h"
 
 tactic * mk_qfufbv_tactic(ast_manager & m, params_ref const & p) {
     params_ref main_p;
     main_p.set_bool("elim_and", true);
     main_p.set_bool("blast_distinct", true);
 
-    tactic * preamble_st = and_then(mk_simplify_tactic(m),
+    tactic * preamble_st = and_then(if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
+                                    mk_simplify_tactic(m),
                                     mk_propagate_values_tactic(m),
                                     mk_solve_eqs_tactic(m),
                                     mk_elim_uncnstr_tactic(m),
