@@ -36,6 +36,7 @@ expr_ref sym_expr::accept(expr* e) {
         break;
     }
     case t_char:
+        SASSERT(m.get_sort(e) == m.get_sort(m_t));
         result = m.mk_eq(e, m_t);
         break;
     case t_range: {
@@ -82,7 +83,7 @@ eautomaton* re2automaton::operator()(expr* e) {
 
 eautomaton* re2automaton::re2aut(expr* e) {
     SASSERT(u.is_re(e));
-    expr* e1, *e2;
+    expr *e0, *e1, *e2;
     scoped_ptr<eautomaton> a, b;
     unsigned lo, hi;
     zstring s1, s2;
@@ -97,8 +98,7 @@ eautomaton* re2automaton::re2aut(expr* e) {
     }
     else if (u.re.is_star(e, e1) && (a = re2aut(e1))) {
         a->add_final_to_init_moves();
-        a->add_init_to_final_states();
-        
+        a->add_init_to_final_states();        
         return a.detach();            
     }
     else if (u.re.is_plus(e, e1) && (a = re2aut(e1))) {
@@ -115,8 +115,6 @@ eautomaton* re2automaton::re2aut(expr* e) {
             unsigned start = s1[0];
             unsigned stop = s2[0];
             unsigned nb = s1.num_bits();
-            sort_ref s(bv.mk_sort(nb), m);          
-            expr_ref v(m.mk_var(0, s), m);
             expr_ref _start(bv.mk_numeral(start, nb), m);
             expr_ref _stop(bv.mk_numeral(stop, nb), m);
             a = alloc(eautomaton, sm, sym_expr::mk_range(_start, _stop));
@@ -124,6 +122,40 @@ eautomaton* re2automaton::re2aut(expr* e) {
         }
         else {
             TRACE("seq", tout << "Range expression is not handled: " << mk_pp(e, m) << "\n";);
+        }
+    }
+    else if (u.re.is_complement(e, e0)) {
+        // TBD non-standard semantics of complementation.
+        if (u.re.is_range(e0, e1, e2) && u.str.is_string(e1, s1) && u.str.is_string(e2, s2) &&
+            s1.length() == 1 && s2.length() == 1) {
+            unsigned start = s1[0];
+            unsigned stop = s2[0];
+            unsigned nb = s1.num_bits();
+            sort_ref s(bv.mk_sort(nb), m);          
+            expr_ref v(m.mk_var(0, s), m);
+            expr_ref _start(bv.mk_numeral(start, nb), m);
+            expr_ref _stop(bv.mk_numeral(stop, nb), m);
+            expr_ref _pred(m.mk_not(m.mk_and(bv.mk_ule(_start, v), bv.mk_ule(v, _stop))), m);
+            a = alloc(eautomaton, sm, sym_expr::mk_pred(_pred));
+            return a.detach();
+        }
+        else if (u.re.is_to_re(e0, e1) && u.str.is_string(e1, s1) && s1.length() == 1) {
+            unsigned nb = s1.num_bits();
+            sort_ref s(bv.mk_sort(nb), m);          
+            expr_ref v(m.mk_var(0, s), m);
+            expr_ref _ch(bv.mk_numeral(s1[0], nb), m);          
+            expr_ref _pred(m.mk_not(m.mk_eq(v, _ch)), m);
+            a = alloc(eautomaton, sm, sym_expr::mk_pred(_pred));
+            return a.detach();
+        }
+        else if (u.re.is_to_re(e0, e1) && u.str.is_unit(e1, e2)) {
+            expr_ref v(m.mk_var(0, m.get_sort(e2)), m);
+            expr_ref _pred(m.mk_not(m.mk_eq(v, e2)), m);
+            a = alloc(eautomaton, sm, sym_expr::mk_pred(_pred));
+            return a.detach();
+        }
+        else {
+            TRACE("seq", tout << "Complement expression is not handled: " << mk_pp(e, m) << "\n";);
         }
     }
     else if (u.re.is_loop(e, e1, lo, hi) && (a = re2aut(e1))) {
@@ -224,6 +256,9 @@ br_status seq_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * con
     case OP_RE_INTERSECT:
         SASSERT(num_args == 2);
         return mk_re_inter(args[0], args[1], result);
+    case OP_RE_COMPLEMENT:
+        SASSERT(num_args == 1);
+        return mk_re_complement(args[0], result);
     case OP_RE_LOOP:
         return mk_re_loop(num_args, args, result);
     case OP_RE_EMPTY_SET:
@@ -383,7 +418,7 @@ br_status seq_rewriter::mk_seq_extract(expr* a, expr* b, expr* c, expr_ref& resu
     zstring s;
     rational pos, len;
     if (m_util.str.is_string(a, s) && m_autil.is_numeral(b, pos) && m_autil.is_numeral(c, len) &&
-        pos.is_unsigned() && len.is_unsigned() && pos.get_unsigned() <= s.length()) {
+        pos.is_unsigned() && len.is_unsigned() && pos.get_unsigned() + len.get_unsigned() <= s.length()) {
         unsigned _pos = pos.get_unsigned();
         unsigned _len = len.get_unsigned();
         result = m_util.str.mk_string(s.extract(_pos, _len));
@@ -538,34 +573,40 @@ br_status seq_rewriter::mk_seq_prefix(expr* a, expr* b, expr_ref& result) {
             }
         }        
     }
-    if (a1 != b1) {
-        return BR_FAILED;
-    }
     m_util.str.get_concat(a, as);
     m_util.str.get_concat(b, bs);
     unsigned i = 0;
     bool all_values = true;    
+    expr_ref_vector eqs(m());
     for (; i < as.size() && i < bs.size(); ++i) {
-        all_values &= m().is_value(as[i].get()) && m().is_value(bs[i].get());
-        if (as[i].get() != bs[i].get()) {
-            if (all_values) {
-                result = m().mk_false();
-                return BR_DONE;
-            }
-            break;
+        expr* a = as[i].get(), *b = bs[i].get();
+        if (a == b) {
+            continue;
         }
-    };
+        all_values &= m().is_value(a) && m().is_value(b);
+        if (all_values) {
+            result = m().mk_false();
+            return BR_DONE;
+        }
+        if (m_util.str.is_unit(a) && m_util.str.is_unit(b)) {
+            eqs.push_back(m().mk_eq(a, b));
+            continue;
+        }
+        break;
+    }
     if (i == as.size()) {
-        result = m().mk_true();
-        return BR_DONE;
+        result = mk_and(eqs);
+        if (m().is_true(result)) {
+            return BR_DONE;
+        }
+        return BR_REWRITE3;
     }
     SASSERT(i < as.size());
     if (i == bs.size()) {
-        expr_ref_vector es(m());
         for (unsigned j = i; j < as.size(); ++j) {
-            es.push_back(m().mk_eq(m_util.str.mk_empty(m().get_sort(a)), as[j].get()));
+            eqs.push_back(m().mk_eq(m_util.str.mk_empty(m().get_sort(a)), as[j].get()));
         }
-        result = mk_and(es);
+        result = mk_and(eqs);
         return BR_REWRITE3;
     }
     if (i > 0) {
@@ -575,8 +616,9 @@ br_status seq_rewriter::mk_seq_prefix(expr* a, expr* b, expr_ref& result) {
         result = m_util.str.mk_prefix(a, b);
         return BR_DONE;
     }
-    UNREACHABLE();
-    return BR_FAILED;
+    else {
+        return BR_FAILED;
+    }
 }
 
 br_status seq_rewriter::mk_seq_suffix(expr* a, expr* b, expr_ref& result) {
@@ -785,8 +827,8 @@ bool seq_rewriter::is_sequence(expr* e, expr_ref_vector& seq) {
         else if (m_util.str.is_empty(e)) {
             continue;
         }
-        else if (m_util.str.is_unit(e)) {
-            seq.push_back(e);
+        else if (m_util.str.is_unit(e, e1)) {
+            seq.push_back(e1);
         }
         else if (m_util.str.is_concat(e, e1, e2)) {
             todo.push_back(e1);
@@ -865,6 +907,10 @@ br_status seq_rewriter::mk_str_in_regexp(expr* a, expr* b, expr_ref& result) {
                 else {
                     cond = mv.t()->accept(ch);
                     if (m().is_false(cond)) {
+                        continue;
+                    }
+                    if (m().is_true(cond)) {
+                        add_next(next, trail, mv.dst(), acc);
                         continue;
                     }
                     expr* args[2] = { cond, acc };
@@ -955,6 +1001,26 @@ br_status seq_rewriter::mk_re_union(expr* a, expr* b, expr_ref& result) {
     return BR_FAILED;
 }
 
+br_status seq_rewriter::mk_re_complement(expr* a, expr_ref& result) {
+    expr* e1, *e2;
+    if (m_util.re.is_intersection(a, e1, e2)) {
+        result = m_util.re.mk_union(m_util.re.mk_complement(e1), m_util.re.mk_complement(e2));
+        return BR_REWRITE2;
+    }
+    if (m_util.re.is_union(a, e1, e2)) {
+        result = m_util.re.mk_inter(m_util.re.mk_complement(e1), m_util.re.mk_complement(e2));
+        return BR_REWRITE2;
+    }
+    if (m_util.re.is_empty(a)) {
+        result = m_util.re.mk_full(m().get_sort(a));
+        return BR_DONE;
+    }
+    if (m_util.re.is_full(a)) {
+        result = m_util.re.mk_empty(m().get_sort(a));
+        return BR_DONE;
+    }
+    return BR_FAILED;
+}
 
 /**
    (emp n r) = emp
@@ -1221,19 +1287,19 @@ bool seq_rewriter::reduce_eq(expr_ref_vector& ls, expr_ref_vector& rs, expr_ref_
             SASSERT(m().get_sort(ch) == m().get_sort(a));
             lhs.push_back(ch);
             rhs.push_back(a);
-            ls.pop_back();
+            ++head1;
             if (s.length() == 1) {
-                rs.pop_back();
+                ++head2;
             }
             else {
                 expr_ref s2(m_util.str.mk_string(s.extract(1, s.length()-1)), m());
-                rs[rs.size()-1] = s2;
+                rs[head2] = s2;
             }            
         }
         else {
             break;
         }
-        TRACE("seq", tout << "change front\n";);
+        TRACE("seq", tout << ls << " == " << rs << "\n";);
        
         change = true;
         lchange = true;
@@ -1413,6 +1479,7 @@ expr* seq_rewriter::concat_non_empty(unsigned n, expr* const* as) {
 
 bool seq_rewriter::set_empty(unsigned sz, expr* const* es, bool all, expr_ref_vector& lhs, expr_ref_vector& rhs) {
     zstring s;
+    expr* emp = 0;
     for (unsigned i = 0; i < sz; ++i) {
         if (m_util.str.is_unit(es[i])) {
             if (all) return false;
@@ -1427,7 +1494,8 @@ bool seq_rewriter::set_empty(unsigned sz, expr* const* es, bool all, expr_ref_ve
             }
         }
         else {
-            lhs.push_back(m_util.str.mk_empty(m().get_sort(es[i])));
+            emp = emp?emp:m_util.str.mk_empty(m().get_sort(es[i]));
+            lhs.push_back(emp);
             rhs.push_back(es[i]);
         }
     }
@@ -1474,6 +1542,7 @@ bool seq_rewriter::length_constrained(unsigned szl, expr* const* l, unsigned szr
         if (is_sat) {
             lhs.push_back(concat_non_empty(szl, l));
             rhs.push_back(concat_non_empty(szr, r));
+            //split_units(lhs, rhs);
         }
         return true;
     }
@@ -1482,12 +1551,38 @@ bool seq_rewriter::length_constrained(unsigned szl, expr* const* l, unsigned szr
         if (is_sat) {
             lhs.push_back(concat_non_empty(szl, l));
             rhs.push_back(concat_non_empty(szr, r));
+            //split_units(lhs, rhs);
         }
         return true;
-    }
-    
+    }    
     return false;
 }
+
+void seq_rewriter::split_units(expr_ref_vector& lhs, expr_ref_vector& rhs) {
+    expr* a, *b, *a1, *b1, *a2, *b2;
+    while (true) {
+        if (m_util.str.is_unit(lhs.back(), a) &&
+            m_util.str.is_unit(rhs.back(), b)) {
+            lhs[lhs.size()-1] = a;
+            rhs[rhs.size()-1] = b;
+            break;
+        }
+        if (m_util.str.is_concat(lhs.back(), a, a2) && 
+            m_util.str.is_unit(a, a1) && 
+            m_util.str.is_concat(rhs.back(), b, b2) &&
+            m_util.str.is_unit(b, b1)) {
+            expr_ref _pin_a(lhs.back(), m()), _pin_b(rhs.back(), m());
+            lhs[lhs.size()-1] = a1;
+            rhs[rhs.size()-1] = b1;
+            lhs.push_back(a2);
+            rhs.push_back(b2);
+        }
+        else {
+            break;
+        }
+    }
+}
+
 
 bool seq_rewriter::is_epsilon(expr* e) const {
     expr* e1;
