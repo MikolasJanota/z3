@@ -34,6 +34,7 @@ Notes:
 #include"lackr.h"
 #include"ackermannization_params.hpp"
 #include"qfufbv_ackr_model_converter.h"
+#include"bv_bound_chk_tactic.h"
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
@@ -144,6 +145,7 @@ tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p) {
         //using_params(mk_ctx_simplify_tactic(m_m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
         if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
         mk_max_bv_sharing_tactic(m),
         using_params(mk_simplify_tactic(m), simp2_p)
@@ -164,26 +166,13 @@ tactic * mk_qfufbv_preamble(ast_manager & m, params_ref const & p) {
         mk_max_bv_sharing_tactic(m)
         );
 }
->>>>>>> upstream/master
 
 tactic * mk_qfufbv_tactic(ast_manager & m, params_ref const & p) {
     params_ref main_p;
     main_p.set_bool("elim_and", true);
     main_p.set_bool("blast_distinct", true);
 
-<<<<<<< HEAD
-    tactic * preamble_st = and_then(if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
-                                    mk_simplify_tactic(m),
-                                    mk_propagate_values_tactic(m),
-                                    mk_solve_eqs_tactic(m),
-                                    mk_elim_uncnstr_tactic(m),
-                                    if_no_proofs(if_no_unsat_cores(mk_reduce_args_tactic(m))),
-                                    if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
-                                    mk_max_bv_sharing_tactic(m)
-                                    );
-=======
     tactic * const preamble_st = mk_qfufbv_preamble(m, p);
->>>>>>> upstream/master
 
     tactic * st = using_params(and_then(preamble_st,
         cond(mk_is_qfbv_probe(), mk_qfbv_tactic(m), mk_smt_tactic())),
