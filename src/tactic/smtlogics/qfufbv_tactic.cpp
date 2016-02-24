@@ -34,6 +34,7 @@ Notes:
 #include"lackr.h"
 #include"ackermannization_params.hpp"
 #include"qfufbv_ackr_model_converter.h"
+#include"bv_bound_chk_tactic.h"
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
@@ -154,6 +155,7 @@ static tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p) {
         //using_params(mk_ctx_simplify_tactic(m_m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
         if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
         mk_max_bv_sharing_tactic(m),
         using_params(mk_simplify_tactic(m), simp2_p)
