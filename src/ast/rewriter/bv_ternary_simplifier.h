@@ -19,13 +19,22 @@
 
 #include"ast.h"
 #include"params.h"
+#include"statistics.h"
+
+
+struct bv_ternary_stats {
+    unsigned            m_simps;
+    bv_ternary_stats() : m_simps(0) {};
+};
+
 
 class bv_ternary_simplifier {
-    struct     imp;
-    imp *      m_imp;
-    params_ref m_params;
+    struct             imp;
+    imp *              m_imp;
+    params_ref         m_params;
+    bv_ternary_stats&   m_stats;
 public:
-    bv_ternary_simplifier(ast_manager & m, params_ref const & p = params_ref());
+    bv_ternary_simplifier(ast_manager & m, params_ref const & p, bv_ternary_stats& stats);
     ~bv_ternary_simplifier();
 
     ast_manager & m() const;
@@ -41,6 +50,8 @@ public:
 
     void cleanup();
     void reset();
+    void collect_statistics(statistics & st) const;
+    void reset_statistics();
 };
 
 #endif /* BV_TERNARY_SIMPLIFIER_H_ */

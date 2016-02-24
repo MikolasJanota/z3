@@ -29,9 +29,10 @@
 
 class tvec {
 public:
-    tvec() : m_data(0), m_ref_count(0) {}
+    tvec() : m_data(0), m_ref_count(0), m_size(0) {}
+
     tvec(vector<lbool>::const_iterator b, unsigned size)
-        : m_data(0), m_ref_count(0)
+        : m_data(0), m_ref_count(0), m_size(size)
     {
         m_data = static_cast<lbool*>(memory::allocate(sizeof(lbool) * size));
         for (unsigned i = 0; i < size; ++i,++b) m_data[i] = *b;
@@ -39,6 +40,19 @@ public:
 
     ~tvec() {
         if (m_data) memory::deallocate(m_data);
+    }
+
+    inline unsigned size() const {
+        return m_size;
+    }
+
+    inline lbool get(unsigned i) const {
+        SASSERT(i < m_size);
+        return m_data[i];
+    }
+
+    inline lbool operator[] (unsigned i) const {
+        return get(i);
     }
 
     void inc_ref() {
@@ -53,9 +67,223 @@ public:
 private:
     lbool *    m_data;
     unsigned   m_ref_count;
+    unsigned   m_size;
 };
 
+
 typedef ref<tvec> tvec_ref;
+
+std::ostream & operator<<(std::ostream & target, const tvec_ref& r) {
+    target << '[';
+    unsigned i = r->size();
+    while(i--) {
+        switch (r->get(i))
+        {
+        case l_false: target << '0'; break;
+        case l_true: target << '1'; break;
+        case l_undef: target << '*'; break;
+        default:
+            UNREACHABLE();
+            break;
+        }
+    }
+    return target << ']';
+}
+
+class tvec_maker {
+public:
+    tvec_maker(ast_manager & m) : m_bv_util(m) {        
+    }
+    virtual ~tvec_maker() {}
+    tvec_ref mk_num(app * n);
+    tvec_ref mk_num(rational r, unsigned sz);
+    tvec_ref mk_undef(unsigned sz);
+    tvec_ref mk_concat(func_decl * f, unsigned num, expr * const * args, unsigned depth);
+    tvec_ref mk_concat(const tvec_ref&  v1, const tvec_ref&  v2);
+    tvec_ref mk_add(const tvec_ref&  v1, const tvec_ref&  v2);
+    lbool    is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const;
+    lbool    is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const;
+
+    lbool     check(func_decl * f, unsigned num, expr * const * args);
+    tvec_ref  mk_tvec(expr* e, unsigned depth);
+    ast_manager& m()  const { return m_bv_util.get_manager(); }
+private:
+    vector<lbool>                    m_tmp;
+    bv_util                          m_bv_util;
+
+    inline void clean() {
+        m_tmp.reset();
+    }
+
+    inline tvec_ref mk(unsigned sz) {
+        SASSERT(sz == m_tmp.size());
+        tvec_ref rv(alloc(tvec, m_tmp.begin(), sz));
+        clean();
+        SASSERT(m_tmp.empty());
+        TRACE("bv_ternary", tout << "mk: " << rv << std::endl;);
+        return rv;
+    }
+};
+
+lbool tvec_maker::is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const {
+    SASSERT(v1->size() == v2->size());
+    unsigned i = v1->size();
+    bool def_true = true;
+    while (i--) {
+        const lbool b1 = v1->get(i);
+        const lbool b2 = v2->get(i);
+        if (b1 == l_undef || b2 == l_undef) {
+            def_true = false;
+        }
+        else {
+            if (b1 != b2) return l_false;
+        }
+    }
+    return def_true ? l_true : l_undef;
+}
+
+lbool tvec_maker::is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const {
+    SASSERT(v1->size() == v2->size());
+    unsigned i = v1->size();
+    bool approx = false;
+    while (i--) {
+        const lbool b1 = v1->get(i);
+        const lbool b2 = v2->get(i);
+        if (b1 == l_true  && b2 == l_false) return approx ? l_undef: l_false;
+        if (b1 == l_false && b2 == l_true)  return l_true;
+        if (b1 == l_false || b2 == l_true) {
+            approx = true;
+            continue;
+        }
+        return l_undef;
+    }
+    return l_true;
+}
+
+tvec_ref tvec_maker::mk_num(app * n) {
+    rational val;
+    unsigned sz;
+    const bool c = m_bv_util.is_numeral(n, val, sz);
+    SASSERT(c);
+    return mk_num(val, sz);
+}
+
+tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {
+    TRACE("bv_ternary", tout << "mk_num: " << val << ":" << sz << std::endl;);
+    TRACE("bv_ternary", tout << "sz " << m_tmp.size() << ":" << sz << std::endl;);
+    const rational two(2);
+    unsigned i = sz;
+    while (i--) {
+        m_tmp.push_back(val.is_even() ? l_false : l_true);
+        val = div(val, two);
+    }
+    TRACE("bv_ternary", tout << "sz " << m_tmp.size() << ":" << sz << std::endl;);
+    return mk(sz);
+}
+
+tvec_ref tvec_maker::mk_undef(unsigned sz) {
+    unsigned i = sz;
+    while (i--) m_tmp.push_back(l_undef);
+    return mk(sz);
+}
+
+tvec_ref tvec_maker::mk_concat(const tvec_ref&  v1, const tvec_ref&  v2) {
+    for (unsigned i = 0; i < v2->size(); i++) m_tmp.push_back(v2->get(i));
+    for (unsigned i = 0; i < v1->size(); i++) m_tmp.push_back(v1->get(i));    
+    return mk(v1->size() + v2->size());
+}
+
+tvec_ref tvec_maker::mk_concat(func_decl * f, unsigned num, expr * const * args, unsigned depth) {
+    SASSERT(f->get_decl_kind() == OP_CONCAT);
+    unsigned sz = 0;
+    vector<tvec_ref> vs;
+    for (unsigned i = 0; i < num; ++i) vs.push_back(mk_tvec(args[i], depth));
+    unsigned i = num;
+    while (i--) {
+        const tvec_ref v = vs[i];
+        for (unsigned j = 0; j < v->size(); j++) m_tmp.push_back(v->get(j));
+        sz += v->size();
+    }
+    return mk(sz);
+}
+
+tvec_ref tvec_maker::mk_add(const tvec_ref&  v1, const tvec_ref&  v2) {
+    TRACE("bv_ternary", tout << "mk_add: " << v1 << " " << v2 << std::endl;);
+    SASSERT(v1->size() == v2->size());
+    const unsigned sz = v1->size();
+    lbool c = l_false;
+    for (unsigned i = 0; i < sz; i++) {
+        const lbool b1 = v1->get(i);
+        const lbool b2 = v2->get(i);
+        const bool u = c == l_undef || b1 == l_undef || b2 == l_undef;
+        unsigned t(0);
+        if (c == l_true) ++t;
+        if (b1 == l_true) ++t;
+        if (b2 == l_true) ++t;
+        m_tmp.push_back(u ? l_undef : ((t & 1) ? l_true : l_false));
+        switch (t) {
+        case 0: c = l_false; break;
+        case 1: c = (u ? l_undef : l_false); break;
+        case 2:
+        case 3:
+            c = l_true; 
+            break;
+        default:
+            UNREACHABLE();
+        }
+    }    
+    return mk(sz);
+}
+
+
+
+tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
+    TRACE("bv_ternary", tout << "mk_tvec: " << mk_ismt2_pp(e, m()) << std::endl;);
+    const unsigned sz = m_bv_util.get_bv_size(e);
+    if (!depth || !is_app(e)) return mk_undef(sz);
+    --depth;
+    app* a = to_app(e);
+    //SASSERT(a->get_family_id() == m_bv_util.get_fid());
+    if (m_bv_util.is_numeral(a)) {
+        tvec_ref nr = mk_num(a);
+        TRACE("bv_ternary", tout << "mk_tvec: " << mk_ismt2_pp(e, m()) << ":" << nr << std::endl;);
+        return nr;
+    }
+    if (a->get_decl_kind() == OP_CONCAT) {
+        return mk_concat(a->get_decl(), a->get_num_args(), a->get_args(), depth);
+        //return mk_concat(mk_tvec(a->get_arg(0), depth), mk_tvec(a->get_arg(1), depth));
+    }
+    if (a->get_decl_kind() == OP_BADD && a->get_num_args() == 2)
+        return mk_add(mk_tvec(a->get_arg(0), depth), mk_tvec(a->get_arg(1), depth));
+    if (a->get_decl_kind() == OP_BIT0) return mk_num(rational::zero(), 1);
+    if (a->get_decl_kind() == OP_BIT1) return mk_num(rational::one(), 1);
+    return mk_undef(sz);
+}
+
+lbool tvec_maker::check(func_decl * f, unsigned num, expr * const * args) {
+    ///SASSERT(a->get_family_id() == m_bv_util.get_family_id());
+    const unsigned depth(3);
+    if (!num) return l_undef;
+    if (m().get_sort(args[0])->get_family_id() != m_bv_util.get_fid()) return l_undef;
+    switch (f->get_decl_kind()) {
+    case OP_ULEQ: {
+        const tvec_ref a0 = mk_tvec(args[0], depth);
+        const tvec_ref a1 = mk_tvec(args[1], depth);
+        const lbool uler = is_ule(a0, a1);
+        TRACE("bv_ternary", tout << "ule: " << a0 << " " << a1  << "=" << uler << std::endl;);
+        return uler;
+    }
+    case OP_EQ: {
+        const tvec_ref a0 = mk_tvec(args[0], depth);
+        const tvec_ref a1 = mk_tvec(args[1], depth);
+        const lbool eqr = is_eq(a0, a1);
+        TRACE("bv_ternary", tout << "eq: " << a0 << " " << a1 << "=" << eqr << std::endl;);
+        return eqr;
+    }
+    default: return l_undef;
+    }
+}
+
 
 struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
     bool_rewriter       m_b_rw;
@@ -63,11 +291,9 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
     bv_util             m_bv_util;
     unsigned long long  m_max_memory; // in bytes
     unsigned            m_max_steps;
-    bool                m_pull_cheap_ite;
     bool                m_flat;
     bool                m_cache_all;
-    bool                m_push_ite_arith;
-    bool                m_push_ite_bv;
+    bv_ternary_stats&   m_stats;
 
     ast_manager & m() const { return m_b_rw.m(); }
 
@@ -76,10 +302,7 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
         m_flat = p.flat();
         m_max_memory = megabytes_to_bytes(p.max_memory());
         m_max_steps = p.max_steps();
-        m_pull_cheap_ite = p.pull_cheap_ite();
         m_cache_all = p.cache_all();
-        m_push_ite_arith = p.push_ite_arith();
-        m_push_ite_bv = p.push_ite_bv();
     }
 
     void updt_params(params_ref const & p) {
@@ -117,22 +340,19 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
         if (fid == null_family_id)
             return BR_FAILED;
         br_status st = BR_FAILED;
-        if (fid == m_b_rw.get_fid()) {
-            decl_kind k = f->get_decl_kind();
-            if (k == OP_EQ) {
-                // theory dispatch for =
-                SASSERT(num == 2);
-                family_id s_fid = m().get_sort(args[0])->get_family_id();
-                if (s_fid == m_bv_rw.get_fid())
-                    st = m_bv_rw.mk_eq_core(args[0], args[1], result);
-
-                if (st != BR_FAILED)
-                    return st;
-            }
-            return m_b_rw.mk_app_core(f, num, args, result);
+        tvec_maker tm(m());
+        const lbool r = tm.check(f, num, args);
+        if (r != l_undef) (m_stats.m_simps)++;
+        switch (r) {
+        case l_false:
+            result = m().mk_false();
+            return BR_DONE;
+        case l_true:
+            result = m().mk_true();
+            return BR_DONE;
+        case l_undef:
+            return BR_FAILED;
         }
-        if (fid == m_bv_rw.get_fid())
-            return m_bv_rw.mk_app_core(f, num, args, result);
         return BR_FAILED;
     }
 
@@ -154,10 +374,12 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
     }
 
 
-    bv_ternary_simplifier_cfg(ast_manager & m, params_ref const & p) :
+    bv_ternary_simplifier_cfg(ast_manager & m, params_ref const & p, bv_ternary_stats& stats) :
         m_b_rw(m, p),
         m_bv_rw(m, p),
-        m_bv_util(m) {
+        m_bv_util(m),
+        m_stats(stats)
+    {
         updt_local_params(p);
     }
 
@@ -167,15 +389,17 @@ template class rewriter_tpl<bv_ternary_simplifier_cfg>;
 
 struct bv_ternary_simplifier::imp : public rewriter_tpl<bv_ternary_simplifier_cfg> {
     bv_ternary_simplifier_cfg m_cfg;
-    imp(ast_manager & m, params_ref const & p) :
+    imp(ast_manager & m, params_ref const & p, bv_ternary_stats& stats) :
         rewriter_tpl<bv_ternary_simplifier_cfg>(m, m.proofs_enabled(), m_cfg),
-        m_cfg(m, p) {
+        m_cfg(m, p, stats) {
     }
 };
 
-bv_ternary_simplifier::bv_ternary_simplifier(ast_manager & m, params_ref const & p) :
-    m_params(p) {
-    m_imp = alloc(imp, m, p);
+bv_ternary_simplifier::bv_ternary_simplifier(ast_manager & m, params_ref const & p, bv_ternary_stats& stats) :
+    m_params(p),
+    m_stats(stats)
+{
+    m_imp = alloc(imp, m, p, m_stats);
 }
 
 ast_manager & bv_ternary_simplifier::m() const {
@@ -205,11 +429,19 @@ unsigned bv_ternary_simplifier::get_num_steps() const {
     return m_imp->get_num_steps();
 }
 
+void bv_ternary_simplifier::collect_statistics(statistics & st) const {
+   st.update("bv ternary sims", m_stats.m_simps);
+}
+
+void bv_ternary_simplifier::reset_statistics() {
+    m_stats.m_simps = 0;
+}
+
 
 void bv_ternary_simplifier::cleanup() {
     ast_manager & m = m_imp->m();
     dealloc(m_imp);
-    m_imp = alloc(imp, m, m_params);
+    m_imp = alloc(imp, m, m_params, m_stats);
 }
 
 void bv_ternary_simplifier::reset() {
