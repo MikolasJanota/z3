@@ -2135,13 +2135,13 @@ void theory_seq::deque_axiom(expr* n) {
   lit or s = "" or s = s1*(unit c)
   lit or s = "" or !contains(x*s1, s)
 */
-void theory_seq::tightest_prefix(expr* s, expr* x, literal lit1, literal lit2) {
+void theory_seq::tightest_prefix(expr* s, expr* x) {
     expr_ref s1 = mk_first(s);
     expr_ref c  = mk_last(s);
     expr_ref s1c = mk_concat(s1, m_util.str.mk_unit(c));
     literal s_eq_emp = mk_eq_empty(s);
     add_axiom(s_eq_emp, mk_seq_eq(s, s1c));
-    add_axiom(lit1, lit2, s_eq_emp, ~mk_literal(m_util.str.mk_contains(mk_concat(x, s1), s)));
+    add_axiom(s_eq_emp, ~mk_literal(m_util.str.mk_contains(mk_concat(x, s1), s)));
 }
 
 /*
@@ -2155,7 +2155,7 @@ void theory_seq::tightest_prefix(expr* s, expr* x, literal lit1, literal lit2) {
 
   len(t) != 0 & !contains(t, s) => i = -1
   len(t) != 0 & contains(t, s) => t = xsy & i = len(x)
-  len(t) != 0 & contains(t, s) & s != emp => tightest_prefix(x, s)
+  tightest_prefix(x, s)
 
   offset not fixed:
 
@@ -2193,7 +2193,7 @@ void theory_seq::add_indexof_axiom(expr* i) {
         add_axiom(s_eq_empty, ~mk_eq_empty(t), mk_eq(i, minus_one, false));
         add_axiom(~cnt, s_eq_empty, mk_seq_eq(t, xsy));
         add_axiom(~cnt, s_eq_empty, mk_eq(i, lenx, false));
-        tightest_prefix(s, x, ~cnt);
+        tightest_prefix(s, x);
     }
     else {
         // offset >= len(t) => indexof(s, t, offset) = -1
@@ -2227,7 +2227,7 @@ void theory_seq::add_indexof_axiom(expr* i) {
 /*
   let r = replace(a, s, t)
 
-  (contains(a, s) -> tightest_prefix(s,xs))
+  tightest_prefix(s, x)
   (contains(a, s) -> r = xty & a = xsy) &
   (!contains(a, s) -> r = a)
 
@@ -2243,7 +2243,7 @@ void theory_seq::add_replace_axiom(expr* r) {
     add_axiom(cnt,  mk_seq_eq(r, a));
     add_axiom(~cnt, mk_seq_eq(a, xsy));
     add_axiom(~cnt, mk_seq_eq(r, xty));
-    tightest_prefix(s, x, ~cnt);
+    tightest_prefix(s, x);
 }
 
 void theory_seq::add_elim_string_axiom(expr* n) {
@@ -2678,6 +2678,7 @@ literal theory_seq::mk_seq_eq(expr* a, expr* b) {
 }
 
 literal theory_seq::mk_eq_empty(expr* _e) {
+    context& ctx = get_context();
     expr_ref e(_e, m);
     SASSERT(m_util.is_seq(e));
     expr_ref emp(m);
@@ -2697,9 +2698,9 @@ literal theory_seq::mk_eq_empty(expr* _e) {
     }
     emp = m_util.str.mk_empty(m.get_sort(e));
 
-
     literal lit = mk_eq(e, emp, false);
-    get_context().force_phase(lit);
+    ctx.force_phase(lit);
+    ctx.mark_as_relevant(lit);
     return lit;
 }
 
@@ -3381,20 +3382,20 @@ bool theory_seq::add_prefix2prefix(expr* e, bool& change) {
     VERIFY(m_util.str.is_prefix(e, e1, e2));
     SASSERT(ctx.get_assignment(e) == l_false);
     if (canonizes(false, e)) {
+        TRACE("seq", tout << mk_pp(e, m) << " is false\n";);
         return false;
     }
     expr_ref head1(m), tail1(m), head2(m), tail2(m), conc(m);
 
-    TRACE("seq", tout << mk_pp(e, m) << "\n";);
-
     literal e2_is_emp = mk_eq_empty(e2);
     switch (ctx.get_assignment(e2_is_emp)) {
     case l_true:
-        TRACE("seq", tout << mk_pp(e2, m) << " = empty\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << mk_pp(e2, m) << " = empty\n";
+              ctx.display_literals_verbose(tout, 1, &e2_is_emp); tout << "\n"; );        
         return false; // done
     case l_undef:
         // ctx.force_phase(e2_is_emp);
-        TRACE("seq", tout << mk_pp(e2, m) << " ~ empty\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << mk_pp(e2, m) << " ~ empty\n";);
         return true;  // retry
     default:
         break;
@@ -3407,10 +3408,11 @@ bool theory_seq::add_prefix2prefix(expr* e, bool& change) {
     literal e1_is_emp = mk_eq_empty(e1);
     switch (ctx.get_assignment(e1_is_emp)) {
     case l_true:        
-        TRACE("seq", tout << mk_pp(e1, m) << " = empty\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << mk_pp(e1, m) << " !=  empty\n";);
+        add_axiom(ctx.get_literal(e), ~e1_is_emp);
         return false; // done
     case l_undef:        
-        TRACE("seq", tout << mk_pp(e1, m) << " ~ empty\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << mk_pp(e1, m) << " ~ empty\n";);
         return true;  // retry
     default:
         break;
@@ -3426,11 +3428,11 @@ bool theory_seq::add_prefix2prefix(expr* e, bool& change) {
     case l_true: 
         break;
     case l_false:
-        TRACE("seq", tout << head1 << " = " << head2 << "\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << head1 << " != " << head2 << "\n";);
         return false;
     case l_undef:
         ctx.force_phase(~lit);
-        TRACE("seq", tout << head1 << " ~ " << head2 << "\n";);
+        TRACE("seq", tout << mk_pp(e, m) << ": " << head1 << " ~ " << head2 << "\n";);
         return true;
     }
     change = true;
@@ -3439,7 +3441,7 @@ bool theory_seq::add_prefix2prefix(expr* e, bool& change) {
     lits.push_back(~e2_is_emp);
     lits.push_back(lit);
     propagate_lit(0, lits.size(), lits.c_ptr(), ~mk_literal(m_util.str.mk_prefix(tail1, tail2)));
-    TRACE("seq", tout << "saturate: " << tail1 << " = " << tail2 << "\n";);
+    TRACE("seq", tout << mk_pp(e, m) << " saturate: " << tail1 << " = " << tail2 << "\n";);
     return false;
 }
 
@@ -3514,11 +3516,13 @@ bool theory_seq::canonizes(bool sign, expr* e) {
     TRACE("seq", tout << mk_pp(e, m) << " -> " << cont << "\n";);
     if ((m.is_true(cont) && !sign) ||
         (m.is_false(cont) && sign)) {
+        TRACE("seq", display(tout););
         propagate_lit(deps, 0, 0, ctx.get_literal(e));
         return true;
     }
     if ((m.is_false(cont) && !sign) ||
         (m.is_true(cont) && sign)) {
+        TRACE("seq", display(tout););
         return true;
     }
     return false;
