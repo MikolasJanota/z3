@@ -102,6 +102,7 @@ public:
     tvec_ref mk_concat(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_add(const tvec_ref&  v1, const tvec_ref&  v2);
     lbool    is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const;
+    lbool    is_sle(const tvec_ref&  v1, const tvec_ref&  v2) const;
     lbool    is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const;
 
     lbool     check(func_decl * f, unsigned num, expr * const * args);
@@ -123,7 +124,39 @@ private:
         TRACE("bv_ternary", tout << "mk: " << rv << std::endl;);
         return rv;
     }
+
+    template<bool Signed>
+    lbool    is_le(const tvec_ref&  v1, const tvec_ref&  v2) const;
 };
+
+template<bool Signed>
+lbool tvec_maker::is_le(const tvec_ref&  v1, const tvec_ref&  v2) const {
+    SASSERT(v1->size() > 0);
+    SASSERT(v1->size() == v2->size());
+    const unsigned sz = v1->size();
+    if (Signed) {
+        const lbool s1 = v1->get(sz - 1);
+        const lbool s2 = v2->get(sz - 1);
+        if (s1 == l_undef || s2 == l_undef) return l_undef;
+        if (s1 == l_true && s2 == l_false) return l_true;
+        if (s1 == l_false && s2 == l_true) return l_false;
+        SASSERT(s1 == s2 && s1 != l_undef);
+    }
+    unsigned i = Signed ? sz - 1 : sz;
+    bool approx = false;
+    while (i--) {
+        const lbool b1 = v1->get(i);
+        const lbool b2 = v2->get(i);
+        if (b1 == l_true  && b2 == l_false) return approx ? l_undef : l_false;
+        if (b1 == l_false && b2 == l_true)  return l_true;
+        if (b1 == l_false || b2 == l_true) {
+            approx = true;
+            continue;
+        }
+        return l_undef;
+    }
+    return l_true;
+}
 
 lbool tvec_maker::is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const {
     SASSERT(v1->size() == v2->size());
@@ -143,22 +176,13 @@ lbool tvec_maker::is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const {
 }
 
 lbool tvec_maker::is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const {
-    SASSERT(v1->size() == v2->size());
-    unsigned i = v1->size();
-    bool approx = false;
-    while (i--) {
-        const lbool b1 = v1->get(i);
-        const lbool b2 = v2->get(i);
-        if (b1 == l_true  && b2 == l_false) return approx ? l_undef: l_false;
-        if (b1 == l_false && b2 == l_true)  return l_true;
-        if (b1 == l_false || b2 == l_true) {
-            approx = true;
-            continue;
-        }
-        return l_undef;
-    }
-    return l_true;
+    return is_le<false>(v1, v2);
 }
+
+lbool tvec_maker::is_sle(const tvec_ref&  v1, const tvec_ref&  v2) const {
+    return is_le<true>(v1, v2);
+}
+
 
 tvec_ref tvec_maker::mk_num(app * n) {
     rational val;
@@ -271,6 +295,13 @@ lbool tvec_maker::check(func_decl * f, unsigned num, expr * const * args) {
         const tvec_ref a1 = mk_tvec(args[1], depth);
         const lbool uler = is_ule(a0, a1);
         TRACE("bv_ternary", tout << "ule: " << a0 << " " << a1  << "=" << uler << std::endl;);
+        return uler;
+    }
+    case OP_SLEQ: {
+        const tvec_ref a0 = mk_tvec(args[0], depth);
+        const tvec_ref a1 = mk_tvec(args[1], depth);
+        const lbool uler = is_sle(a0, a1);
+        TRACE("bv_ternary", tout << "sle: " << a0 << " " << a1 << "=" << uler << std::endl;);
         return uler;
     }
     case OP_EQ: {
