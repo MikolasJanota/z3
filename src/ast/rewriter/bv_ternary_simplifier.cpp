@@ -100,6 +100,7 @@ public:
     tvec_ref mk_undef(unsigned sz);
     tvec_ref mk_concat(func_decl * f, unsigned num, expr * const * args, unsigned depth);
     tvec_ref mk_concat(const tvec_ref&  v1, const tvec_ref&  v2);
+    tvec_ref mk_extract(unsigned low, unsigned hi, const tvec_ref&  body);
     tvec_ref mk_add(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_mul(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2);
@@ -247,6 +248,14 @@ tvec_ref tvec_maker::mk_undef(unsigned sz) {
     return mk(sz);
 }
 
+tvec_ref tvec_maker::mk_extract(unsigned low, unsigned hi, const tvec_ref&  body) {
+    const unsigned sz = body->size();
+    SASSERT(low <= hi && hi < sz);
+    for (unsigned i = low; i <= hi; i++)
+        m_tmp.push_back(body->get(i));
+    return mk(hi - low + 1);
+}
+
 tvec_ref tvec_maker::mk_concat(const tvec_ref&  v1, const tvec_ref&  v2) {
     for (unsigned i = 0; i < v2->size(); i++) m_tmp.push_back(v2->get(i));
     for (unsigned i = 0; i < v1->size(); i++) m_tmp.push_back(v1->get(i));    
@@ -332,16 +341,14 @@ tvec_ref tvec_maker::mk_add(const tvec_ref&  v1, const tvec_ref&  v2) {
         case 1: c = (u ? l_undef : l_false); break;
         case 2:
         case 3:
-            c = l_true; 
+            c = l_true;
             break;
         default:
             UNREACHABLE();
         }
-    }    
+    }
     return mk(sz);
 }
-
-
 
 tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
     TRACE("bv_ternary", tout << "mk_tvec: " << mk_ismt2_pp(e, m()) << std::endl;);
@@ -375,6 +382,16 @@ tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
         }
         return rv;
     }
+
+    {
+        expr* body;
+        unsigned low, high;
+        if (m_bv_util.is_extract(a, low, high, body)) {
+            const tvec_ref b = mk_tvec(body, depth);
+            return mk_extract(low, high, b);
+        }
+    }
+
 
     if (m_bv_util.is_concat(a)) {
         return mk_concat(a->get_decl(), num, a->get_args(), depth);
