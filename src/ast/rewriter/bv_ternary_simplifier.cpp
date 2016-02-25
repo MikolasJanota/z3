@@ -557,7 +557,7 @@ unsigned bv_ternary_simplifier::get_num_steps() const {
 }
 
 void bv_ternary_simplifier::collect_statistics(statistics & st) const {
-   st.update("bv ternary sims", m_stats.m_simps);
+   st.update("bv ternary simps", m_stats.m_simps);
 }
 
 void bv_ternary_simplifier::reset_statistics() {
