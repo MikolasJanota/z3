@@ -342,8 +342,8 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
     const bool nz2 = find_hi_nz_bit(v2, nzp2, nzv2);
     const bool h1 = find_hi_bit(v1, hp1);
     const bool h2 = find_hi_bit(v2, hp2);
+    if (!h2) return mk_undef(sz); // TODO Different handling, div0?
     if (!nz1) return mk_num(rational::zero(), sz);
-    if (!nz2) return mk_undef(sz); // TODO Different handling?
     if (h2 && (nzp1 < hp2)) return mk_num(rational::zero(), sz);
     const bool has1 = h1 && (hp1 >= nzp2);
     for (unsigned i = 0; i < sz; ++i) {
