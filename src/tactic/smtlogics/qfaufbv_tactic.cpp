@@ -26,6 +26,7 @@ Notes:
 #include"ctx_simplify_tactic.h"
 #include"sat_tactic.h"
 #include"smt_tactic.h"
+#include"bv_ternary_tactic.h"
 
 tactic * mk_qfaufbv_tactic(ast_manager & m, params_ref const & p) {
     params_ref main_p;
@@ -51,6 +52,7 @@ tactic * mk_qfaufbv_tactic(ast_manager & m, params_ref const & p) {
                                     // using_params(mk_ctx_simplify_tactic(m), ctx_simp_p),
                                     mk_solve_eqs_tactic(m),
                                     mk_elim_uncnstr_tactic(m),
+                                    if_no_proofs(if_no_unsat_cores(mk_bv_ternary_tactic(m))),
                                     if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
                                     using_params(mk_simplify_tactic(m), simp2_p),
                                     mk_max_bv_sharing_tactic(m)
