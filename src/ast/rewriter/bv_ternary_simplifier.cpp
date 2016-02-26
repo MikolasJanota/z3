@@ -92,13 +92,15 @@ std::ostream & operator<<(std::ostream & target, const tvec_ref& r) {
 
 class tvec_maker {
 public:
-    tvec_maker(ast_manager & m) : m_bv_util(m) {        
+    tvec_maker(ast_manager & m) : m_bv_util(m) {
     }
     virtual ~tvec_maker() {}
     tvec_ref mk_num(app * n);
     tvec_ref mk_num(rational r, unsigned sz);
     tvec_ref mk_undef(unsigned sz);
     tvec_ref mk_concat(func_decl * f, unsigned num, expr * const * args, unsigned depth);
+    tvec_ref mk_and(func_decl * f, unsigned num, expr * const * args, unsigned depth);
+    tvec_ref mk_or(func_decl * f, unsigned num, expr * const * args, unsigned depth);
     tvec_ref mk_concat(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_extract(unsigned low, unsigned hi, const tvec_ref&  body);
     tvec_ref mk_add(const tvec_ref&  v1, const tvec_ref&  v2);
@@ -135,6 +137,9 @@ private:
         unsigned& hi_bit_pos,
         lbool& hi_bit_val);
     bool find_hi_bit(const tvec_ref& v, unsigned& hi_bit_pos);
+
+    template<lbool Id_val, lbool Ctrl_val>
+    tvec_ref mk_bitwise(func_decl * f, unsigned num, expr * const * args, unsigned depth);
 };
 
 bool tvec_maker::find_hi_bit(const tvec_ref& v, unsigned& hi_bit_pos) {
@@ -192,7 +197,7 @@ lbool tvec_maker::is_le(const tvec_ref&  v1, const tvec_ref&  v2) const {
         else {
             if (b1 == l_true  && b2 == l_false) return can_be_t ? l_undef : l_false;
             if (b1 == l_false && b2 == l_true) return can_be_f ? l_undef : l_true;
-        }               
+        }
     }
     return can_be_f ? l_undef : l_true;
 }
@@ -221,7 +226,6 @@ lbool tvec_maker::is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const {
 lbool tvec_maker::is_sle(const tvec_ref&  v1, const tvec_ref&  v2) const {
     return is_le<true>(v1, v2);
 }
-
 
 tvec_ref tvec_maker::mk_num(app * n) {
     rational val;
@@ -258,8 +262,41 @@ tvec_ref tvec_maker::mk_extract(unsigned low, unsigned hi, const tvec_ref&  body
 
 tvec_ref tvec_maker::mk_concat(const tvec_ref&  v1, const tvec_ref&  v2) {
     for (unsigned i = 0; i < v2->size(); i++) m_tmp.push_back(v2->get(i));
-    for (unsigned i = 0; i < v1->size(); i++) m_tmp.push_back(v1->get(i));    
+    for (unsigned i = 0; i < v1->size(); i++) m_tmp.push_back(v1->get(i));
     return mk(v1->size() + v2->size());
+}
+
+template<lbool Id_val, lbool Ctrl_val>
+tvec_ref tvec_maker::mk_bitwise(func_decl * f, unsigned num, expr * const * args, unsigned depth) {
+    vector<tvec_ref> vs;
+    for (unsigned i = 0; i < num; ++i) {
+        vs.push_back(mk_tvec(args[i], depth));
+        SASSERT(!i || vs[i]->size() == vs[i - 1]->size());
+    }
+
+    unsigned sz = num ? vs[0]->size() : m_bv_util.get_bv_size(f->get_range());
+    for (unsigned i = 0; i < sz; ++i) {
+        lbool val = Id_val;
+        for (unsigned j = 0; j < num; ++j) {
+            const lbool b = vs[j]->get(i);
+            if (val == Id_val && b == Id_val) val = Id_val;
+            else if (val == Ctrl_val || b == Ctrl_val) val = Ctrl_val;
+            else val = l_undef;
+            if (val == Ctrl_val) break;
+        }
+        m_tmp.push_back(val);
+    }
+    return mk(sz);
+}
+
+tvec_ref tvec_maker::mk_and(func_decl * f, unsigned num, expr * const * args, unsigned depth) {
+    SASSERT(f->get_decl_kind() == OP_BAND);
+    return mk_bitwise<l_true,l_false>(f, num, args, depth);
+}
+
+tvec_ref tvec_maker::mk_or(func_decl * f, unsigned num, expr * const * args, unsigned depth) {
+    SASSERT(f->get_decl_kind() == OP_BOR);
+    return mk_bitwise<l_false,l_true>(f, num, args, depth);
 }
 
 tvec_ref tvec_maker::mk_concat(func_decl * f, unsigned num, expr * const * args, unsigned depth) {
@@ -294,7 +331,6 @@ tvec_ref tvec_maker::mk_mul(const tvec_ref&  v1, const tvec_ref&  v2) {
     for (unsigned i = hbp + 1; i < sz; ++i) m_tmp.push_back(l_false);
     return mk(sz);
 }
-
 
 tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
     SASSERT(v1->size() == v2->size());
@@ -391,6 +427,12 @@ tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
         }
     }
 
+    if (m_bv_util.is_bv_and(a)) {
+        return mk_and(a->get_decl(), num, a->get_args(), depth);
+    }
+    if (m_bv_util.is_bv_or(a)) {
+        return mk_or(a->get_decl(), num, a->get_args(), depth);
+    }
 
     if (m_bv_util.is_concat(a)) {
         return mk_concat(a->get_decl(), num, a->get_args(), depth);
