@@ -106,7 +106,7 @@ public:
     tvec_ref mk_add(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_mul(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2);
-    tvec_ref mk_urem(const tvec_ref&  v1, const tvec_ref&  v2);
+    tvec_ref mk_urem(tvec_ref&  v1, tvec_ref&  v2);
     lbool    is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const;
     lbool    is_sle(const tvec_ref&  v1, const tvec_ref&  v2) const;
     lbool    is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const;
@@ -360,7 +360,7 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
 }
 
 
-tvec_ref tvec_maker::mk_urem(const tvec_ref&  v1, const tvec_ref&  v2) {
+tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
     SASSERT(v1->size() == v2->size());
     SASSERT(v1->size());
     unsigned nzp1, nzp2, hp1, hp2;
@@ -370,15 +370,18 @@ tvec_ref tvec_maker::mk_urem(const tvec_ref&  v1, const tvec_ref&  v2) {
     const bool nz2 = find_hi_nz_bit(v2, nzp2, nzv2);
     const bool h1 = find_hi_bit(v1, hp1);
     const bool h2 = find_hi_bit(v2, hp2);
-    if (!h2) return mk_undef(sz); // TODO Different handling?
+    if (!h2) return mk_undef(sz); // TODO div 0 Different handling?
     if (!nz1) return mk_num(rational::zero(), sz); // 0 / rhs
+    tvec_ref rv;
     if (nzp1 < hp2) {// rhs bigger than lhs, urem has no effect
-         return v1;
+         rv = v1;
     } else {
          // result at most as big as rhs
          for (unsigned i = 0; i <= nzp2; ++i) m_tmp.push_back(l_undef);
          for (unsigned i = nzp2+1; i < sz; ++i) m_tmp.push_back(l_false);
+         rv = mk(sz);
     }
+    TRACE("bv_ternary", tout << "mk_urem: " << v1 << ":" << v2 << "=" << rv << std::endl;);
     return rv;
 }
 
@@ -469,8 +472,8 @@ tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
         case OP_BIT1: return mk_num(rational::one(), 1);
         case OP_BUDIV_I:
             SASSERT(num == 2);
-            const tvec_ref a0 = mk_tvec(a->get_arg(0), depth);
-            const tvec_ref a1 = mk_tvec(a->get_arg(1), depth);
+            tvec_ref a0 = mk_tvec(a->get_arg(0), depth);
+            tvec_ref a1 = mk_tvec(a->get_arg(1), depth);
             if (kind == OP_BUDIV_I) return mk_udiv(a0, a1);
             if (kind == OP_BUREM_I) return mk_urem(a0, a1);
             break;
