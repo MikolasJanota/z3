@@ -359,31 +359,30 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
 }
 
 tvec_ref tvec_maker::mk_add(const tvec_ref&  v1, const tvec_ref&  v2) {
-    TRACE("bv_ternary", tout << "mk_add: " << v1 << " " << v2 << std::endl;);
     SASSERT(v1->size() == v2->size());
     const unsigned sz = v1->size();
     lbool c = l_false;
     for (unsigned i = 0; i < sz; i++) {
         const lbool b1 = v1->get(i);
         const lbool b2 = v2->get(i);
-        const bool u = c == l_undef || b1 == l_undef || b2 == l_undef;
         unsigned t(0);
-        if (c == l_true) ++t;
+        unsigned u(0);
+        if (c  == l_true) ++t;
         if (b1 == l_true) ++t;
         if (b2 == l_true) ++t;
+        if (c  == l_undef) ++u;
+        if (b1 == l_undef) ++u;
+        if (b2 == l_undef) ++u;
         m_tmp.push_back(u ? l_undef : ((t & 1) ? l_true : l_false));
-        switch (t) {
-        case 0: c = l_false; break;
-        case 1: c = (u ? l_undef : l_false); break;
-        case 2:
-        case 3:
-            c = l_true;
-            break;
-        default:
-            UNREACHABLE();
-        }
+        const unsigned lo = t;
+        const unsigned hi = lo + u;
+        if (lo > 1) c = l_true;
+        else if (hi <= 1) c = l_false;
+        else c = l_undef;
     }
-    return mk(sz);
+    const tvec_ref rv = mk(sz);
+    TRACE("bv_ternary", tout << "mk_add: " << v1 << ":" << v2 << "=" << rv << std::endl;);
+    return rv;
 }
 
 tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
