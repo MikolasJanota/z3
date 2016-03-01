@@ -107,12 +107,14 @@ public:
     tvec_ref mk_mul(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2);
     tvec_ref mk_urem(tvec_ref&  v1, tvec_ref&  v2);
+    tvec_ref mk_shl(tvec_ref&  v1, tvec_ref&  v2);
     lbool    is_ule(const tvec_ref&  v1, const tvec_ref&  v2) const;
     lbool    is_sle(const tvec_ref&  v1, const tvec_ref&  v2) const;
     lbool    is_eq(const tvec_ref&  v1, const tvec_ref&  v2) const;
 
     lbool     check(func_decl * f, unsigned num, expr * const * args);
     tvec_ref  mk_tvec(expr* e, unsigned depth);
+    tvec_ref  mk_tvec_core(expr* e, unsigned depth);
     ast_manager& m()  const { return m_bv_util.get_manager(); }
 private:
     vector<lbool>                    m_tmp;
@@ -129,6 +131,10 @@ private:
         SASSERT(m_tmp.empty());
         TRACE("bv_ternary", tout << "mk: " << rv << std::endl;);
         return rv;
+    }
+
+    inline void push_tmp(lbool b) {
+        m_tmp.push_back(b);
     }
 
     template<bool Signed>
@@ -241,7 +247,7 @@ tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {
     const rational two(2);
     unsigned i = sz;
     while (i--) {
-        m_tmp.push_back(val.is_even() ? l_false : l_true);
+        push_tmp(val.is_even() ? l_false : l_true);
         val = div(val, two);
     }
     return mk(sz);
@@ -249,7 +255,7 @@ tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {
 
 tvec_ref tvec_maker::mk_undef(unsigned sz) {
     unsigned i = sz;
-    while (i--) m_tmp.push_back(l_undef);
+    while (i--) push_tmp(l_undef);
     return mk(sz);
 }
 
@@ -257,13 +263,13 @@ tvec_ref tvec_maker::mk_extract(unsigned low, unsigned hi, const tvec_ref&  body
     const unsigned sz = body->size();
     SASSERT(low <= hi && hi < sz);
     for (unsigned i = low; i <= hi; i++)
-        m_tmp.push_back(body->get(i));
+        push_tmp(body->get(i));
     return mk(hi - low + 1);
 }
 
 tvec_ref tvec_maker::mk_concat(const tvec_ref&  v1, const tvec_ref&  v2) {
-    for (unsigned i = 0; i < v2->size(); i++) m_tmp.push_back(v2->get(i));
-    for (unsigned i = 0; i < v1->size(); i++) m_tmp.push_back(v1->get(i));
+    for (unsigned i = 0; i < v2->size(); i++) push_tmp(v2->get(i));
+    for (unsigned i = 0; i < v1->size(); i++) push_tmp(v1->get(i));
     return mk(v1->size() + v2->size());
 }
 
@@ -285,7 +291,7 @@ tvec_ref tvec_maker::mk_bitwise(func_decl * f, unsigned num, expr * const * args
             else val = l_undef;
             if (val == Ctrl_val) break;
         }
-        m_tmp.push_back(val);
+        push_tmp(val);
     }
     return mk(sz);
 }
@@ -308,30 +314,52 @@ tvec_ref tvec_maker::mk_concat(func_decl * f, unsigned num, expr * const * args,
     unsigned i = num;
     while (i--) {
         const tvec_ref v = vs[i];
-        for (unsigned j = 0; j < v->size(); j++) m_tmp.push_back(v->get(j));
+        for (unsigned j = 0; j < v->size(); j++) push_tmp(v->get(j));
         sz += v->size();
     }
     return mk(sz);
 }
 
+
 tvec_ref tvec_maker::mk_mul(const tvec_ref&  v1, const tvec_ref&  v2) {
     SASSERT(v1->size() == v2->size());
     SASSERT(v1->size());
-    unsigned hbp1, hbp2;
-    lbool    hbv1, hbv2;
     const unsigned sz = v1->size();
-    const bool nz1 = find_hi_nz_bit(v1, hbp1, hbv1);
-    const bool nz2 = find_hi_nz_bit(v2, hbp2, hbv2);
-    if (!nz1 || !nz2) return mk_num(rational::zero(), sz);
-    SASSERT(hbv1 != l_false && hbv2 != l_false);
-    const unsigned hbp = hbp1 + hbp2;
-    if (hbp >= sz) return mk_undef(sz);
-    const lbool    hbv = (hbv1 == hbv2) ? hbv1 : l_undef;
-    for (unsigned i = 0; i < hbp; ++i) m_tmp.push_back(l_undef);
-    m_tmp.push_back(hbv);
-    for (unsigned i = hbp + 1; i < sz; ++i) m_tmp.push_back(l_false);
-    return mk(sz);
+    vector<tvec_ref> vs;
+    for (unsigned shift = 0; shift < sz; ++shift) {
+        if (v2->get(shift) == l_false)  continue;
+        const bool u = v2->get(shift) == l_undef;
+        for (unsigned i = 0; i < shift; ++i) push_tmp(l_false);
+        for (unsigned i = shift; i < sz; ++i)
+            push_tmp(u ? l_undef : v1->get(i - shift));
+        vs.push_back(mk(sz));
+    }
+    if (vs.empty())
+        return mk_num(rational::zero(), sz);
+    tvec_ref rv = vs[0];
+    for (unsigned i = 1; i < vs.size(); ++i) rv = mk_add(rv, vs[i]);
+    return rv;
 }
+
+
+//tvec_ref tvec_maker::mk_mul(const tvec_ref&  v1, const tvec_ref&  v2) {
+//    SASSERT(v1->size() == v2->size());
+//    SASSERT(v1->size());
+//    unsigned hbp1, hbp2;
+//    lbool    hbv1, hbv2;
+//    const unsigned sz = v1->size();
+//    const bool nz1 = find_hi_nz_bit(v1, hbp1, hbv1);
+//    const bool nz2 = find_hi_nz_bit(v2, hbp2, hbv2);
+//    if (!nz1 || !nz2) return mk_num(rational::zero(), sz);
+//    SASSERT(hbv1 != l_false && hbv2 != l_false);
+//    const unsigned hbp = hbp1 + hbp2;
+//    if (hbp >= sz) return mk_undef(sz);
+//    const lbool    hbv = (hbv1 == hbv2) ? hbv1 : l_undef;
+//    for (unsigned i = 0; i < hbp; ++i) push_tmp(l_undef);
+//    push_tmp(hbv);
+//    for (unsigned i = hbp + 1; i < sz; ++i) push_tmp(l_false);
+//    return mk(sz);
+//}
 
 tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
     SASSERT(v1->size() == v2->size());
@@ -352,13 +380,45 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
         if (has1 && i == (hp1 - nzp2)) b = l_true;
         else if (h2 && i > (nzp1 - hp2)) b = l_false;
         else b = l_undef;
-        m_tmp.push_back(b);
+        push_tmp(b);
     }
     const tvec_ref rv = mk(sz);
     TRACE("bv_ternary", tout << "mk_udiv: " << v1 << ":" << v2 << "=" << rv << std::endl;);
     return rv;
 }
 
+tvec_ref tvec_maker::mk_shl(tvec_ref&  v1, tvec_ref&  v2) {
+    SASSERT(v1->size() == v2->size());
+    SASSERT(v1->size());
+    const unsigned sz = v1->size();
+    unsigned lb2 = 0;
+    unsigned ub2 = 0;
+    unsigned b = 1;
+    for (unsigned i = 0; i < sz; ++i) {
+        if (b >= sz) break;
+        if (v2->get(i) == l_true)  lb2 += b;
+        if (v2->get(i) != l_false) ub2 += b;
+        b <<= 1;
+    }
+    if (ub2 == 0) return v1;
+    if (lb2 >= sz) return mk_num(rational::zero(), sz);
+    for (unsigned i = 0; i < lb2; ++i)
+        push_tmp(l_false);
+    if (lb2 == ub2) {
+        for (unsigned i = lb2; i < sz; ++i)
+            push_tmp(v1->get(i - lb2));
+    }
+    else {
+        unsigned nzp1; lbool    nzv1;
+        const bool nz1 = find_hi_nz_bit(v1, nzp1, nzv1);
+        const unsigned ulen = nz1 ? std::min(nzp1 + ub2 + 1, sz) : sz;
+        for (unsigned i = lb2; i < ulen; ++i)
+            push_tmp(l_undef);
+        for (unsigned i = ulen; i < sz; ++i)
+            push_tmp(l_false);
+    }
+    return mk(sz);
+}
 
 tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
     SASSERT(v1->size() == v2->size());
@@ -377,8 +437,8 @@ tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
          rv = v1;
     } else {
          // result at most as big as rhs
-         for (unsigned i = 0; i <= nzp2; ++i) m_tmp.push_back(l_undef);
-         for (unsigned i = nzp2+1; i < sz; ++i) m_tmp.push_back(l_false);
+         for (unsigned i = 0; i <= nzp2; ++i) push_tmp(l_undef);
+         for (unsigned i = nzp2+1; i < sz; ++i) push_tmp(l_false);
          rv = mk(sz);
     }
     TRACE("bv_ternary", tout << "mk_urem: " << v1 << ":" << v2 << "=" << rv << std::endl;);
@@ -401,7 +461,7 @@ tvec_ref tvec_maker::mk_add(const tvec_ref&  v1, const tvec_ref&  v2) {
         if (c  == l_undef) ++u;
         if (b1 == l_undef) ++u;
         if (b2 == l_undef) ++u;
-        m_tmp.push_back(u ? l_undef : ((t & 1) ? l_true : l_false));
+        push_tmp(u ? l_undef : ((t & 1) ? l_true : l_false));
         const unsigned lo = t;
         const unsigned hi = lo + u;
         if (lo > 1) c = l_true;
@@ -414,7 +474,13 @@ tvec_ref tvec_maker::mk_add(const tvec_ref&  v1, const tvec_ref&  v2) {
 }
 
 tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
-    TRACE("bv_ternary", tout << "mk_tvec: " << mk_ismt2_pp(e, m()) << std::endl;);
+    const tvec_ref rv = mk_tvec_core(e, depth);
+    TRACE("bv_ternary", tout << "mk_tvec@" << depth <<":"
+        << mk_ismt2_pp(e, m()) << ":" << rv << std::endl;);
+    return rv;
+}
+
+tvec_ref tvec_maker::mk_tvec_core(expr* e, unsigned depth) {
     const unsigned sz = m_bv_util.get_bv_size(e);
     if (!depth || !is_app(e)) return mk_undef(sz);
     --depth;
@@ -470,12 +536,14 @@ tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
         {
         case OP_BIT0: return mk_num(rational::zero(), 1);
         case OP_BIT1: return mk_num(rational::one(), 1);
-        case OP_BUDIV_I:
-            SASSERT(num == 2);
-            tvec_ref a0 = mk_tvec(a->get_arg(0), depth);
-            tvec_ref a1 = mk_tvec(a->get_arg(1), depth);
-            if (kind == OP_BUDIV_I) return mk_udiv(a0, a1);
-            if (kind == OP_BUREM_I) return mk_urem(a0, a1);
+        default:
+            if (num == 2) {
+                tvec_ref a0 = mk_tvec(a->get_arg(0), depth);
+                tvec_ref a1 = mk_tvec(a->get_arg(1), depth);
+                if (kind == OP_BUDIV_I) return mk_udiv(a0, a1);
+                if (kind == OP_BUREM_I) return mk_urem(a0, a1);
+                if (kind == OP_BSHL) return mk_shl(a0, a1);
+            }
             break;
         }
     }
@@ -484,7 +552,7 @@ tvec_ref tvec_maker::mk_tvec(expr* e, unsigned depth) {
 
 lbool tvec_maker::check(func_decl * f, unsigned num, expr * const * args) {
     ///SASSERT(a->get_family_id() == m_bv_util.get_family_id());
-    const unsigned depth(3);
+    const unsigned depth(6);
     if (!num) return l_undef;
     if (m().get_sort(args[0])->get_family_id() != m_bv_util.get_fid()) return l_undef;
     switch (f->get_decl_kind()) {
