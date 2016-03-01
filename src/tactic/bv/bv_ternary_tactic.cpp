@@ -134,6 +134,6 @@ void bv_ternary_tactic::reset_statistics() {
     m_imp->reset_statistics();
 }
 
-tactic * mk_bv_ternary_tactic(ast_manager & m, params_ref const & p){
+tactic * mk_bv_ternary_tactic(ast_manager & m, params_ref const & p) {
     return alloc(bv_ternary_tactic, m, p);
 }

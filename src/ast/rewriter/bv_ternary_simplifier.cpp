@@ -633,6 +633,8 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
     }
 
     br_status reduce_app_core(func_decl * f, unsigned num, expr * const * args, expr_ref & result) {
+//        return BR_FAILED;
+
         family_id fid = f->get_family_id();
         if (fid == null_family_id)
             return BR_FAILED;
