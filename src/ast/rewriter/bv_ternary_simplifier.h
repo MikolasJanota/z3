@@ -25,7 +25,8 @@
 struct bv_ternary_stats {
     unsigned            m_simps;
     unsigned            m_splits;
-    bv_ternary_stats() : m_simps(0), m_splits(0) {};
+    unsigned            m_speqs;
+    bv_ternary_stats() : m_simps(0), m_splits(0), m_speqs(0) {};
 };
 
 
