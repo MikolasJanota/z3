@@ -99,14 +99,14 @@ void bv_ternary_tactic::operator()(goal_ref const & g,
     proof_converter_ref & pc,
     expr_dependency_ref & core) {
     SASSERT(g->is_well_sorted());
-    fail_if_proof_generation("bv-bound-chk", g);
-    fail_if_unsat_core_generation("bv-bound-chk", g);
-    TRACE("bv-bound-chk", g->display(tout << "before:"); tout << std::endl;);
+    fail_if_proof_generation("bv-ternary", g);
+    fail_if_unsat_core_generation("bv-ternary", g);
+    TRACE("bv-ternary", g->display(tout << "before:"); tout << std::endl;);
     mc = 0; pc = 0; core = 0; result.reset();
     m_imp->operator()(g);
     g->inc_depth();
     result.push_back(g.get());
-    TRACE("bv-bound-chk", g->display(tout << "after:"););
+    TRACE("bv-ternary", g->display(tout << "after:"););
     SASSERT(g->is_well_sorted());
 }
 

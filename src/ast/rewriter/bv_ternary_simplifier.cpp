@@ -609,29 +609,30 @@ br_status tvec_maker::split(func_decl * f,
         if (tv->get(i) != l_true) continue;
         v += rational::power_of_two(i);
     }
-    expr * const lo = lo_sz ? m_bv_util.mk_numeral(v, lo_sz)
-                            : NULL;
+    expr_ref lo(m);
+    lo = lo_sz ? m_bv_util.mk_numeral(v, lo_sz) : NULL;
+    if (lo_sz == tv->size()) {
+        result = lo;
+        return BR_DONE;
+    }
+    else return BR_FAILED;
+
     v = rational::zero();
     for (unsigned i = hi_pos; i < tv->size(); ++i) {
         if (tv->get(i) != l_true) continue;
         v += rational::power_of_two(i - hi_pos);
     }
-    expr * const hi = hi_sz ? m_bv_util.mk_numeral(v, hi_sz)
-                            : NULL;
+    expr_ref hi(m);
+    hi = hi_sz ? m_bv_util.mk_numeral(v, hi_sz) : NULL;
 
     SASSERT(tv->size() >= (hi_sz + lo_sz));
     SASSERT(hi_pos >= lo_sz);
-    if (lo_sz == tv->size())  {
-        result = lo;
-        return BR_DONE;
-    }
-    else return BR_FAILED;
     SASSERT(tv->size() > (hi_sz + lo_sz));
     expr * const middle = m_bv_util.mk_extract(hi_pos - 1, lo_sz, a.get());
     ptr_buffer<expr> concat_args;
-    if (hi) concat_args.push_back(hi);
+    if (hi.get()) concat_args.push_back(hi);
     concat_args.push_back(middle);
-    if (lo) concat_args.push_back(lo);
+    if (lo.get()) concat_args.push_back(lo);
     result = m_bv_util.mk_concat(concat_args.size(), concat_args.c_ptr());
     return BR_DONE;
 }
@@ -719,10 +720,10 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
             throw rewriter_exception(Z3_MAX_MEMORY_MSG);
         return num_steps > m_max_steps;
     }
-#define __PL {tout << __FILE__ << ":" << __LINE__ << '\n';}
+#define __PL {std::cerr << __FILE__ << ":" << __LINE__ << '\n';}
 
     br_status reduce_app_core(func_decl * f, unsigned num, expr * const * args, expr_ref & result) {
-      //  return BR_FAILED;
+       //return BR_FAILED;
         const family_id fid = f->get_family_id();
         if (fid == null_family_id)
             return BR_FAILED;
@@ -733,7 +734,8 @@ struct bv_ternary_simplifier_cfg : public default_rewriter_cfg {
             && tm.bvu().is_bv(args[0])
             ) {
             const decl_kind eq_kind = m().get_eq_op(args[0]);
-            func_decl * const ef = m().mk_func_decl(
+            func_decl_ref ef(m()); 
+            ef = m().mk_func_decl(
                 m_b_rw.get_fid(),
                 eq_kind,
                 f->get_num_parameters(), f->get_parameters(),
