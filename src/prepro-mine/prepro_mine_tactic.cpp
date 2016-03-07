@@ -24,6 +24,7 @@
 #include"elim_uncnstr_tactic.h"
 #include"max_bv_sharing_tactic.h"
 #include"bv_size_reduction_tactic.h"
+#include"bv_ternary_tactic.h"
 #include"ctx_simplify_tactic.h"
 ///////////////
 class prepro_mine_tactic : public tactic {
@@ -85,6 +86,7 @@ tactic * mk_prepro_mine_tactic(ast_manager& m, params_ref const & p) {
             mk_solve_eqs_tactic(m),
             mk_elim_uncnstr_tactic(m),
             if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
+            if_no_proofs(if_no_unsat_cores(mk_bv_ternary_tactic(m))),
             mk_max_bv_sharing_tactic(m),
             using_params(mk_simplify_tactic(m), simp2_p)
             );
