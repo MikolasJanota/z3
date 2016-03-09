@@ -21,6 +21,7 @@
 #include"decl_collector.h"
 #include"lbool.h"
 #include"ast_smt2_pp.h"
+#include"model_pp.h"
 #include"tactic2solver.h"
 #include"qfaufbv_tactic.h"
 #include"tactic.h"
@@ -182,6 +183,8 @@ struct miner::imp {
           am.set_mode(m);
           model_ref a(alloc(model, m_m));
           am(size, declarations, a);
+          //model_pp(std::cerr, *(a.get())); std::cerr << std::endl;
+
           m_assignments.push_back(a);
           m_evaluators.push_back(alloc(model_evaluator, *(a.get())));
         }
