@@ -46,6 +46,7 @@ public:
                             /* out */ model_converter_ref & mc,
                             /* out */ proof_converter_ref & pc,
                             /* out */ expr_dependency_ref & core) {
+        tactic_report report("prepro-mine-rw", *g);
         run(*(g.get()));
         g->inc_depth();
         result.push_back(g.get());
