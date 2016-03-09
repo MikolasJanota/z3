@@ -28,6 +28,61 @@
 
 #define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
 
+class expr_collector {
+    ast_manager&                   m_m;
+    sort * const                   m_esort;
+    ast *   const                  m_n;
+    expr_ref_vector                m_collected;
+public:
+    expr_collector(ast_manager& m,
+        sort * esort,
+        ast * n)
+        : m_m(m)
+        , m_esort(esort)
+        , m_n(n)
+        , m_collected(m)
+    {}
+
+    expr_ref_vector&   collected() {
+        return m_collected;
+    }
+
+    void visit() {
+        ptr_vector<ast> todo;
+        ast_mark visited;
+        todo.push_back(m_n);
+        while (!todo.empty()) {
+            ast * const n = todo.back();
+            todo.pop_back();
+            if (!visited.is_marked(n)) {
+                visited.mark(n, true);
+                switch (n->get_kind()) {
+                case AST_APP: {
+                    app * a = to_app(n);
+                    if (a->get_num_args() == 0
+                        && a->get_decl()->get_range() == m_esort) {
+                        m_collected.push_back(a);
+                    }
+                    for (unsigned i = 0; i < a->get_num_args(); ++i) {
+                        todo.push_back(a->get_arg(i));
+                    }
+                    break;
+                }
+                case AST_QUANTIFIER: {
+                    quantifier * q = to_quantifier(n);
+                    todo.push_back(q->get_expr());
+                    break;
+                }
+                case AST_VAR:
+                    break;
+                default:
+                    UNREACHABLE();
+                }
+            }
+        }
+    }
+};
+
 struct miner::imp {
     ast_manager&                   m_m;
     vector<model_ref>              m_assignments;
@@ -292,20 +347,19 @@ void miner::imp::mine_term(app * term) {
         TRACE("miner", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(constant_value, m_m, 2) << "\n";);
         return;
     }
-    decl_collector  collector(m_m, false);
     if (!m_bv_util.is_bv(term)) return;// for now only check bit vectors
-    collector.visit(term);
-    func_decl * const * const declarations = m_collector->get_func_decls();
-    const unsigned decl_num = m_collector->get_num_decls();
-    for (unsigned i = 0; i < decl_num; ++i) {
-        func_decl * const declaration = declarations[i];
-        if (declaration->get_arity() != 0) continue; //skipping non-constants
-        expr_ref v(m_m.mk_const(declaration), m_m);
-        if (check_equality(term, term_values, v) == l_true) {
+    expr_collector  collector(m_m, term->get_decl()->get_range(), term);
+    collector.visit();
+    expr_ref_vector& exprs = collector.collected();
+    const unsigned e_num = exprs.size();
+    for (unsigned i = 0; i < e_num; ++i) {
+        expr_ref e(exprs.get(i), m_m);
+        if (e.get() == term) continue;
+        if (check_equality(term, term_values, e) == l_true) {
             if (m_print) std::cout << "rewrite: "
                 << mk_ismt2_pp(term, m_m, 2)
                 << "->"
-                << mk_ismt2_pp(v, m_m, 2)
+                << mk_ismt2_pp(e, m_m, 2)
                 << std::endl;
         }
     }
@@ -318,6 +372,5 @@ void miner::init(expr_ref f) { m_imp->init(f); }
 bool miner::test_term(app * term, expr_ref& value) {
     return m_imp->test_term(term, value);
 }
-
 
 miner::~miner() { if (m_imp) dealloc(m_imp); }
