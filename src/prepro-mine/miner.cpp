@@ -260,7 +260,9 @@ struct miner::imp {
     lbool is_tautology(expr_ref e) {
         expr_ref n(m_m);
         n = m_m.mk_not(e);
+        std::cerr << '+';
         const lbool dv = is_sat(n);
+        std::cerr << '-';
         if (dv == l_undef) return l_undef;
         if (dv == l_false) return l_true;
         SASSERT(dv == l_true);
