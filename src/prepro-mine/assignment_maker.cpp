@@ -33,6 +33,7 @@ struct assignment_maker::imp {
         , m_b_rw(m)
         //, m_bv_rw(m)
         , m_bv_util(m)
+        , m_rnd(0U)
     {}
 
     bool make_polarity() {
@@ -50,8 +51,8 @@ struct assignment_maker::imp {
         rational one(rational::one());
         rational retv(rational::zero());
         for (unsigned i = 0; i < sz; ++i) {
-           if (make_polarity()) retv = retv + one;
-           retv = retv * two;
+            retv = retv * two;
+            if (make_polarity()) retv = retv + one;
         }
         return m_bv_util.mk_numeral(retv, sz);
     }
