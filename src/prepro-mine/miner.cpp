@@ -46,11 +46,42 @@ struct miner::imp {
     ~imp() { cleanup(); }
 
     void operator() (expr_ref f) {
+        TRACE("miner", tout << "mining: " << mk_ismt2_pp(f, m_m, 2) << std::endl;);
         const bool _print = m_print;
         m_print = true;
         init(f);
         traverse(f);
         m_print = _print;
+    }
+
+    void mine_term(app * term);
+
+    void make_values(app* a, expr_ref_vector& a_values) {
+        a_values.reset();
+        expr_ref tmp(m_m);
+        for (unsigned i = 0; i < m_evaluators.size(); i++) {
+            m_evaluators[i]->operator() (a, tmp);
+            a_values.push_back(tmp);
+        }
+    }
+
+    lbool check_equality(app * a, expr_ref_vector& a_values,
+        expr_ref& e) {
+        SASSERT(a_values.size() == m_evaluators.size());
+        SASSERT(is_app(e));
+        if (!is_app(e)) return l_false;
+        if (a->get_decl()->get_range() != to_app(e)->get_decl()->get_range())
+            return l_false;
+        expr_ref a_value(m_m);
+        expr_ref tmp(m_m);
+        for (unsigned i = 0; i < m_evaluators.size(); i++) {
+            m_evaluators[i]->operator() (e, tmp);
+            expr * const a_value = a_values.get(i);
+            if (!m_m.are_equal(tmp.get(), a_value))
+                return l_false;
+        }
+        expr_ref eq(m_m.mk_eq(a, e), m_m);
+        return decide(eq);
     }
 
     void init(expr_ref& f) {
@@ -90,7 +121,6 @@ struct miner::imp {
     }
 
     inline bool is_val(expr * a) const { return m_m.is_value(a); }
-
 
     bool find_upper_bound(app * term, rational& h) {
         SASSERT(term);
@@ -193,9 +223,6 @@ struct miner::imp {
         expr *           curr;
         expr_mark        visited;
         stack.push_back(f.get());
-        expr_ref         constant_value(m_m);
-        rational         upper_bound;
-		rational         lower_bound;
 
         while (!stack.empty()) {
             curr = stack.back();
@@ -217,11 +244,7 @@ struct miner::imp {
                                                a->get_num_args(), a->get_args())) {
                             visited.mark(a, true);
                             stack.pop_back();
-                            const bool c = test_term(a, constant_value);
-							const bool u = !c && find_upper_bound(a, upper_bound);
-							const bool l = !c && find_lower_bound(a, lower_bound);
-							if (u || l) 
-								std::cout << "u-l: " << mk_ismt2_pp(a, m_m, 2) << "->" << (upper_bound - lower_bound) << "\n";
+                            mine_term(a);
                         }
                     }
                     break;
@@ -244,7 +267,7 @@ struct miner::imp {
         return l_false;
     }
 
-    lbool decide(expr_ref e) {
+    lbool decide(expr_ref& e) {
         tactic_ref t = mk_qfaufbv_tactic(m_m);
         scoped_ptr<solver> sat = mk_tactic2solver(m_m, t.get());
         sat->assert_expr(e);
@@ -252,10 +275,46 @@ struct miner::imp {
     }
 };
 
+
+void miner::imp::mine_term(app * term) {
+    SASSERT(term);
+    if (term->get_depth() > 5) return; //TODO: introduce a parameter
+    if (is_val(term)) return;
+    if (term->get_num_args() == 0) return;
+    expr_ref  constant_value(m_m);
+    expr_ref_vector term_values(m_m);
+    make_values(term, term_values);
+    constant_value = term_values.get(0);
+    if (check_equality(term, term_values, constant_value) == l_true) {
+        if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(constant_value, m_m, 2) << std::endl;
+        TRACE("miner", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(constant_value, m_m, 2) << "\n";);
+        return;
+    }
+    decl_collector  collector(m_m, false);
+    if (!m_bv_util.is_bv(term)) return;// for now only check bit vectors
+    collector.visit(term);
+    func_decl * const * const declarations = m_collector->get_func_decls();
+    const unsigned decl_num = m_collector->get_num_decls();
+    for (unsigned i = 0; i < decl_num; ++i) {
+        func_decl * const declaration = declarations[i];
+        expr_ref v(m_m.mk_const(declaration), m_m);
+        if (check_equality(term, term_values, v) == l_true) {
+            if (m_print) std::cout << "rewrite: "
+                << mk_ismt2_pp(term, m_m, 2)
+                << "->"
+                << mk_ismt2_pp(v, m_m, 2)
+                << std::endl;
+        }
+    }
+}
+
 miner::miner(ast_manager& m) : m_imp(alloc(imp, m)) {}
 void miner::operator() (expr_ref f) { m_imp->operator() (f); }
 void miner::init(expr_ref f) { m_imp->init(f); }
+
 bool miner::test_term(app * term, expr_ref& value) {
     return m_imp->test_term(term, value);
 }
+
+
 miner::~miner() { if (m_imp) dealloc(m_imp); }

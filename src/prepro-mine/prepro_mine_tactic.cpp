@@ -40,6 +40,7 @@ public:
                             /* out */ model_converter_ref & mc,
                             /* out */ proof_converter_ref & pc,
                             /* out */ expr_dependency_ref & core) {
+        tactic_report report("prepro-mine", *g);
         mc = 0;
         ast_manager& m(g->m());
         TRACE("miner", g->display(tout << "Goal:\n"););
@@ -47,7 +48,8 @@ public:
         ptr_vector<expr> flas;
         g->get_formulas(flas);
         expr_ref f(m);
-        f = m.mk_and(flas.size(), flas.c_ptr());
+        f = flas.size()==1 ? flas[0]
+                           : m.mk_and(flas.size(), flas.c_ptr());
         // running implementation
         miner imp(m);
         imp(f);
