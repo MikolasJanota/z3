@@ -59,8 +59,7 @@ public:
                 switch (n->get_kind()) {
                 case AST_APP: {
                     app * a = to_app(n);
-                    if (a->get_num_args() == 0
-                        && a->get_decl()->get_range() == m_esort) {
+                    if (a->get_decl()->get_range() == m_esort) {
                         m_collected.push_back(a);
                     }
                     for (unsigned i = 0; i < a->get_num_args(); ++i) {
@@ -120,8 +119,17 @@ struct miner::imp {
         }
     }
 
-    lbool check_equality(app * a, expr_ref_vector& a_values,
-        expr_ref& e) {
+    lbool check_equality(app * a, expr_ref_vector& a_values, expr_ref& e) {
+        const lbool retv = check_equality_core(a, a_values, e);
+        TRACE("miner", tout << "check_eq: "
+                << mk_ismt2_pp(a, m_m, 2)
+                << " = "
+                << mk_ismt2_pp(e.get(), m_m, 2)
+                << ":" << retv << std::endl;);
+        return retv;
+    }
+
+    lbool check_equality_core(app * a, expr_ref_vector& a_values, expr_ref& e) {
         SASSERT(a_values.size() == m_evaluators.size());
         SASSERT(is_app(e));
         if (!is_app(e)) return l_false;
@@ -166,8 +174,12 @@ struct miner::imp {
         assignment_maker am(m_m);
         const unsigned size = m_collector->get_num_decls();
         func_decl * const * const declarations = m_collector->get_func_decls();
-        for (unsigned i = 0; i < 2; ++i) {
-          am.set_polarity(i & 1);
+        for (unsigned i = 0; i < 5; ++i) {
+            assignment_maker::gen_mode m =
+                i == 0 ? assignment_maker::ZERO
+                : (i == 1 ? assignment_maker::ONE
+                          : assignment_maker::RANDOM);
+          am.set_mode(m);
           model_ref a(alloc(model, m_m));
           am(size, declarations, a);
           m_assignments.push_back(a);
