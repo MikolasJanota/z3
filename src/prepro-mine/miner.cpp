@@ -81,7 +81,7 @@ struct miner::imp {
                 return l_false;
         }
         expr_ref eq(m_m.mk_eq(a, e), m_m);
-        return decide(eq);
+        return is_tautology(eq);
     }
 
     void init(expr_ref& f) {
@@ -134,7 +134,7 @@ struct miner::imp {
         expr_ref mid_e(m_m);
         expr_ref query(m_m);
         query = m_m.mk_eq(term, m_bv_util.mk_numeral(h, bv_sz));
-        if (decide(query) != l_false) return false;
+        if (is_sat(query) != l_false) return false;
         --h;
         while (l < h) {
             std::cout << mk_ismt2_pp(term, m_m, 2) << " lh:" << l << " " << h << "\n";
@@ -142,7 +142,7 @@ struct miner::imp {
             //std::cout << "mid_v:" << mid_v << "\n";
             mid_e = m_bv_util.mk_numeral(mid_v, bv_sz);
             query = m_bv_util.mk_ule(mid_e.get(), term);
-            const lbool t = decide(query);
+            const lbool t = is_sat(query);
             switch (t)
             {
             case l_true:  l = mid_v; break;
@@ -172,7 +172,7 @@ struct miner::imp {
 		expr_ref mid_e(m_m);
 		expr_ref query(m_m);
 		query = m_m.mk_eq(term, m_bv_util.mk_numeral(l, bv_sz));
-		if (decide(query) != l_false) return false;
+		if (is_sat(query) != l_false) return false;
 		++l;
 		while (l < h) {
 			std::cout << mk_ismt2_pp(term, m_m, 2) << " lh:" << l << " " << h << "\n";
@@ -180,7 +180,7 @@ struct miner::imp {
 			//std::cout << "mid_v:" << mid_v << "\n";
 			mid_e = m_bv_util.mk_numeral(mid_v, bv_sz);
 			query = m_bv_util.mk_ule(term, mid_e.get());
-			const lbool t = decide(query);
+			const lbool t = is_sat(query);
 			switch (t)
 			{
 			case l_true:  h = mid_v; break;
@@ -260,14 +260,14 @@ struct miner::imp {
     lbool is_tautology(expr_ref e) {
         expr_ref n(m_m);
         n = m_m.mk_not(e);
-        const lbool dv = decide(n);
+        const lbool dv = is_sat(n);
         if (dv == l_undef) return l_undef;
         if (dv == l_false) return l_true;
         SASSERT(dv == l_true);
         return l_false;
     }
 
-    lbool decide(expr_ref& e) {
+    lbool is_sat(expr_ref& e) {
         tactic_ref t = mk_qfaufbv_tactic(m_m);
         scoped_ptr<solver> sat = mk_tactic2solver(m_m, t.get());
         sat->assert_expr(e);
@@ -297,6 +297,7 @@ void miner::imp::mine_term(app * term) {
     const unsigned decl_num = m_collector->get_num_decls();
     for (unsigned i = 0; i < decl_num; ++i) {
         func_decl * const declaration = declarations[i];
+        if (declaration->get_arity() != 0) continue; //skipping non-constants
         expr_ref v(m_m.mk_const(declaration), m_m);
         if (check_equality(term, term_values, v) == l_true) {
             if (m_print) std::cout << "rewrite: "

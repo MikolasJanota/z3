@@ -252,8 +252,7 @@ tvec_ref tvec_maker::mk_num(app * n) {
     return mk_num(val, sz);
 }
 
-tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {
-    TRACE("bv_ternary", tout << "mk_num: " << val << ":" << sz << std::endl;);
+tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {    
     const rational two(2);
     unsigned i = sz;
     while (i--) {
@@ -384,13 +383,12 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
     if (!h2) return mk_undef(sz); // TODO Different handling, div0?
     if (!nz1) return mk_num(rational::zero(), sz);
     if (h2 && (nzp1 < hp2)) return mk_num(rational::zero(), sz);
-    const bool has1 = h1 && (hp1 >= nzp2);
+    const bool out_has1 = h1 && (hp1 > nzp2);
+    const unsigned pos1 = out_has1 ? hp1 - nzp2 : -1;
     for (unsigned i = 0; i < sz; ++i) {
-        lbool b;
-        if (has1 && i == (hp1 - nzp2)) b = l_true;
-        else if (h2 && i > (nzp1 - hp2)) b = l_false;
-        else b = l_undef;
-        push_tmp(b);
+        if (out_has1 && (i == pos1)) push_tmp(l_true);
+        else if (h2 && i > (nzp1 - hp2)) push_tmp(l_false);
+        else push_tmp(l_undef);
     }
     const tvec_ref rv = mk(sz);
     TRACE("bv_ternary", tout << "mk_udiv: " << v1 << ":" << v2 << "=" << rv << std::endl;);
@@ -421,7 +419,7 @@ tvec_ref tvec_maker::mk_shl(tvec_ref&  v1, tvec_ref&  v2) {
             push_tmp(v1->get(i - lb2));
     }
     else {
-        unsigned nzp1; lbool    nzv1;
+        unsigned nzp1; lbool nzv1;
         const bool nz1 = find_hi_nz_bit(v1, nzp1, nzv1);
         const unsigned ulen = nz1 ? std::min(nzp1 + ub2 + 1, sz) : sz;
         for (unsigned i = lb2; i < ulen; ++i)
@@ -443,7 +441,7 @@ tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
     const bool h1 = find_hi_bit(v1, hp1);
     const bool h2 = find_hi_bit(v2, hp2);
     if (!h2) return mk_undef(sz); // TODO div 0 Different handling?
-    if (!nz1) return mk_num(rational::zero(), sz); // 0 / rhs
+    if (!nz1) return mk_num(rational::zero(), sz); // 0 % rhs
     tvec_ref rv;
     if (nzp1 < hp2) {// rhs bigger than lhs, urem has no effect
          return v1;
