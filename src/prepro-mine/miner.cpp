@@ -183,8 +183,7 @@ struct miner::imp {
           am.set_mode(m);
           model_ref a(alloc(model, m_m));
           am(size, declarations, a);
-          //model_pp(std::cerr, *(a.get())); std::cerr << std::endl;
-
+          TRACE("miner", model_pp(tout << "test assignment:", *(a.get())); tout << std::endl;);
           m_assignments.push_back(a);
           m_evaluators.push_back(alloc(model_evaluator, *(a.get())));
         }
@@ -331,6 +330,7 @@ struct miner::imp {
         expr_ref n(m_m);
         n = m_m.mk_not(e);
         std::cerr << '+';
+        TRACE("miner", tout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;);
         const lbool dv = is_sat(n);
         std::cerr << '-';
         if (dv == l_undef) return l_undef;
