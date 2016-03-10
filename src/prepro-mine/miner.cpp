@@ -367,14 +367,35 @@ void miner::imp::mine_term(app * term) {
     collector.visit();
     expr_ref_vector& exprs = collector.collected();
     const unsigned e_num = exprs.size();
+    const rational zero = rational::zero();
     for (unsigned i = 0; i < e_num; ++i) {
-        expr_ref e(exprs.get(i), m_m);
-        if (e.get() == term) continue;
-        if (check_equality(term, term_values, e) == l_true) {
+        expr_ref sub_e(exprs.get(i), m_m);
+        expr_ref sub_e_val0(m_m);
+        expr_ref  tested_expression(m_m);
+        (*m_evaluators[0])(sub_e, sub_e_val0);
+        rational v0n, ten;
+        unsigned sz0, sz1;
+        if (m_bv_util.is_numeral(constant_value, ten, sz1) &&
+            m_bv_util.is_numeral(sub_e_val0, v0n, sz0)) {
+            SASSERT(sz0==sz1);
+            const rational mod  = rational::power_of_two(sz0);
+            const rational correction_value = (ten >= v0n) ? ten - v0n : ten + mod - v0n;
+            SASSERT(correction_value >= zero && correction_value <= mod);
+            if (correction_value == zero) {
+                tested_expression = sub_e;
+            }
+            else {
+                tested_expression = m_bv_util.mk_bv_add(sub_e, m_bv_util.mk_numeral(correction_value, sz0));
+            }
+        } else {
+             tested_expression = sub_e;
+        }
+        if (tested_expression.get() == term) continue;
+        if (check_equality(term, term_values, tested_expression) == l_true) {
             if (m_print) std::cout << "rewrite: "
                 << mk_ismt2_pp(term, m_m, 2)
                 << "->"
-                << mk_ismt2_pp(e, m_m, 2)
+                << mk_ismt2_pp(tested_expression, m_m, 2)
                 << std::endl;
         }
     }
