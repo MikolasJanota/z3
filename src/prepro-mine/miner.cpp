@@ -385,7 +385,8 @@ void miner::imp::mine_term(app * term) {
                 tested_expression = sub_e;
             }
             else {
-                tested_expression = m_bv_util.mk_bv_add(sub_e, m_bv_util.mk_numeral(correction_value, sz0));
+                expr * const n = m_bv_util.mk_numeral(correction_value, sz0);
+                tested_expression = m_bv_util.mk_bv_add(n, sub_e);
             }
         } else {
              tested_expression = sub_e;
