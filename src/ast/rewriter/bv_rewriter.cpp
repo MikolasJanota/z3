@@ -2216,7 +2216,7 @@ br_status bv_rewriter::mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resu
         result = e;
         return BR_REWRITE1;
     }
-    if (m().is_not(c, e)) {
+    if (m().is_not(c)) {
         result = m().mk_ite(to_app(c)->get_arg(0), e, t);
         return BR_REWRITE1;
     }
