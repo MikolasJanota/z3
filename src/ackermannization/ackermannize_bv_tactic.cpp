@@ -64,7 +64,7 @@ public:
         }
 
         resg->inc_depth();
-        TRACE("ackermannize", resg->display(tout););
+        TRACE("ackermannize", resg->display(tout << "out\n"););
         SASSERT(resg->is_well_sorted());
     }
 
