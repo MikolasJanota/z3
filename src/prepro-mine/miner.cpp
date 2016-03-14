@@ -27,7 +27,8 @@
 #include"tactic.h"
 #include"solver.h"
 
-#define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
+//#define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
+#define __PL tout << __FILE__ << ":" << __LINE__ << "\n";
 
 class expr_collector {
     ast_manager&                   m_m;
@@ -60,7 +61,8 @@ public:
                 switch (n->get_kind()) {
                 case AST_APP: {
                     app * a = to_app(n);
-                    if (a->get_decl()->get_range() == m_esort) {
+                    if (a->get_decl()->get_range()->get_family_id()
+                        == m_esort->get_family_id()) {
                         m_collected.push_back(a);
                     }
                     for (unsigned i = 0; i < a->get_num_args(); ++i) {
@@ -345,6 +347,49 @@ struct miner::imp {
         sat->assert_expr(e);
         return sat->check_sat(0, 0);
     }
+
+    bool test_conc_suffix(
+            rational term_val0, unsigned term_sz,
+            expr_ref sub_e, rational sub_val0, unsigned sub_sz,
+            /*out*/expr_ref& tested_expression) {
+        TRACE("miner", tout << "szs: " << term_sz << ":" << sub_sz <<std::endl;);
+        if (term_sz <= sub_sz) return false;
+        const rational two(2);
+        const rational one(rational::one());
+        const unsigned suff_sz = term_sz - sub_sz;
+        rational suff(rational::zero());;
+        for (unsigned i = 0; i < suff_sz; ++i) {
+            if (!term_val0.is_even())
+                suff += rational::power_of_two(i);
+            term_val0 = div(term_val0, two);
+        }
+        expr * const n = m_bv_util.mk_numeral(suff, suff_sz);
+        tested_expression = m_bv_util.mk_concat(sub_e, n);
+        return true;
+    }
+
+    bool test_add_correction(
+            rational& term_val0, unsigned term_sz,
+            expr_ref& sub_e, rational& sub_val0, unsigned sub_sz,
+            /*out*/expr_ref& tested_expression) {
+        if (term_sz != sub_sz) return false;
+        if (term_val0 == sub_val0) return false;
+        const rational mod  = rational::power_of_two(sub_sz);
+        const rational correction_value = (term_val0 >= sub_val0) ?
+            term_val0 - sub_val0 : term_val0  + mod - sub_val0;
+        SASSERT(correction_value > rational::zero() && correction_value <= mod);
+        expr * const n = m_bv_util.mk_numeral(correction_value, term_sz);
+        tested_expression = m_bv_util.mk_bv_add(n, sub_e);
+        return true;
+    }
+
+    void get_val0(expr* e, /*out*/rational& val0, /*out*/unsigned& sz) {
+        expr_ref eval0(m_m);
+        (*m_evaluators[0])(e, eval0);
+        const bool isn = m_bv_util.is_numeral(eval0, val0, sz);
+        SASSERT(isn);
+        if (!isn) UNREACHABLE();
+    }
 };
 
 
@@ -353,10 +398,12 @@ void miner::imp::mine_term(app * term) {
     if (term->get_depth() > 5) return; //TODO: introduce a parameter
     if (is_val(term)) return;
     if (term->get_num_args() == 0) return;
-    expr_ref  constant_value(m_m);
+    TRACE("miner", tout << "mining: " << mk_ismt2_pp(term, m_m, 2) << std::endl;);
+    expr_ref constant_value(m_m);
     expr_ref_vector term_values(m_m);
     make_values(term, term_values);
     constant_value = term_values.get(0);
+    TRACE("miner", tout << "testing constant: " << mk_ismt2_pp(constant_value.get(), m_m, 2) << std::endl;);
     if (check_equality(term, term_values, constant_value) == l_true) {
         if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(constant_value, m_m, 2) << std::endl;
         TRACE("miner", tout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(constant_value, m_m, 2) << "\n";);
@@ -368,36 +415,44 @@ void miner::imp::mine_term(app * term) {
     expr_ref_vector& exprs = collector.collected();
     const unsigned e_num = exprs.size();
     const rational zero = rational::zero();
+    rational term_val0;
+    unsigned term_sz;
+    get_val0(term, term_val0, term_sz);
     for (unsigned i = 0; i < e_num; ++i) {
         expr_ref sub_e(exprs.get(i), m_m);
-        expr_ref sub_e_val0(m_m);
-        expr_ref  tested_expression(m_m);
-        (*m_evaluators[0])(sub_e, sub_e_val0);
-        rational v0n, ten;
-        unsigned sz0, sz1;
-        if (m_bv_util.is_numeral(constant_value, ten, sz1) &&
-            m_bv_util.is_numeral(sub_e_val0, v0n, sz0)) {
-            SASSERT(sz0==sz1);
-            const rational mod  = rational::power_of_two(sz0);
-            const rational correction_value = (ten >= v0n) ? ten - v0n : ten + mod - v0n;
-            SASSERT(correction_value >= zero && correction_value <= mod);
-            if (correction_value == zero) {
+        TRACE("miner", tout << "sub_e: " << mk_ismt2_pp(sub_e.get(), m_m, 2) << std::endl;);
+        rational sub_e_val0;
+        unsigned sub_e_sz;
+        get_val0(sub_e, sub_e_val0, sub_e_sz);
+        for (int op = 0; op < 3; ++op) {
+            TRACE("miner", tout << "op: " << op << std::endl;);
+            expr_ref tested_expression(m_m);
+            switch (op) {
+            case 0:
+                if (term_val0 != sub_e_val0) continue;
                 tested_expression = sub_e;
+                break;
+            case 1:
+                if (!test_add_correction(term_val0, term_sz,
+                    sub_e, sub_e_val0, sub_e_sz,
+                    tested_expression)) continue;
+                break;
+            case 2:
+                __PL;
+                if (!test_conc_suffix(term_val0, term_sz,
+                    sub_e, sub_e_val0, sub_e_sz,
+                    tested_expression)) continue;
+                break;
             }
-            else {
-                expr * const n = m_bv_util.mk_numeral(correction_value, sz0);
-                tested_expression = m_bv_util.mk_bv_add(n, sub_e);
+            SASSERT(tested_expression.get());
+            if (tested_expression.get() == term) continue;
+            TRACE("miner", tout << "testing: " << mk_ismt2_pp(tested_expression.get(), m_m, 2) << std::endl;);
+            if (check_equality(term, term_values, tested_expression) == l_true) {
+                if (m_print) std::cout << "rewrite: "
+                    << mk_ismt2_pp(term, m_m, 2) << "->"
+                    << mk_ismt2_pp(tested_expression, m_m, 2)
+                    << std::endl;
             }
-        } else {
-             tested_expression = sub_e;
-        }
-        if (tested_expression.get() == term) continue;
-        if (check_equality(term, term_values, tested_expression) == l_true) {
-            if (m_print) std::cout << "rewrite: "
-                << mk_ismt2_pp(term, m_m, 2)
-                << "->"
-                << mk_ismt2_pp(tested_expression, m_m, 2)
-                << std::endl;
         }
     }
 }
