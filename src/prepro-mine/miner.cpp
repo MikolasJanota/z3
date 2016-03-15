@@ -28,7 +28,7 @@
 #include"solver.h"
 
 //#define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
-#define __PL tout << __FILE__ << ":" << __LINE__ << "\n";
+//#define __PL tout << __FILE__ << ":" << __LINE__ << "\n";
 
 class expr_collector {
     ast_manager&                   m_m;
@@ -348,6 +348,28 @@ struct miner::imp {
         return sat->check_sat(0, 0);
     }
 
+
+    bool test_conc_preffix(
+        rational term_val0, unsigned term_sz,
+        expr_ref sub_e, rational sub_val0, unsigned sub_sz,
+        /*out*/expr_ref& tested_expression) {
+        TRACE("miner", tout << "szs: " << term_sz << ":" << sub_sz << std::endl;);
+        if (term_sz <= sub_sz) return false;
+        const rational two(2);
+        const rational one(rational::one());
+        const unsigned pref_sz = term_sz - sub_sz;
+        rational pref(rational::zero());;
+        for (unsigned i = 0; i < term_sz; ++i) {
+            if (i >= sub_sz && !term_val0.is_even())
+                pref += rational::power_of_two(i);
+            term_val0 = div(term_val0, two);
+        }
+        expr * const n = m_bv_util.mk_numeral(pref, pref_sz);
+        tested_expression = m_bv_util.mk_concat(n, sub_e);
+        return true;
+    }
+
+
     bool test_conc_suffix(
             rational term_val0, unsigned term_sz,
             expr_ref sub_e, rational sub_val0, unsigned sub_sz,
@@ -424,7 +446,7 @@ void miner::imp::mine_term(app * term) {
         rational sub_e_val0;
         unsigned sub_e_sz;
         get_val0(sub_e, sub_e_val0, sub_e_sz);
-        for (int op = 0; op < 3; ++op) {
+        for (int op = 0; op < 4; ++op) {
             TRACE("miner", tout << "op: " << op << std::endl;);
             expr_ref tested_expression(m_m);
             switch (op) {
@@ -438,8 +460,12 @@ void miner::imp::mine_term(app * term) {
                     tested_expression)) continue;
                 break;
             case 2:
-                __PL;
                 if (!test_conc_suffix(term_val0, term_sz,
+                    sub_e, sub_e_val0, sub_e_sz,
+                    tested_expression)) continue;
+                break;
+            case 3:
+                if (!test_conc_preffix(term_val0, term_sz,
                     sub_e, sub_e_val0, sub_e_sz,
                     tested_expression)) continue;
                 break;
@@ -448,7 +474,7 @@ void miner::imp::mine_term(app * term) {
             if (tested_expression.get() == term) continue;
             TRACE("miner", tout << "testing: " << mk_ismt2_pp(tested_expression.get(), m_m, 2) << std::endl;);
             if (check_equality(term, term_values, tested_expression) == l_true) {
-                if (m_print) std::cout << "rewrite: "
+                if (m_print) std::cout << "rewrite(" << op << "): "
                     << mk_ismt2_pp(term, m_m, 2) << "->"
                     << mk_ismt2_pp(tested_expression, m_m, 2)
                     << std::endl;
