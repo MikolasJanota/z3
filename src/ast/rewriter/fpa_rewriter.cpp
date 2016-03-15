@@ -107,6 +107,8 @@ br_status fpa_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * con
         SASSERT(num_args == 0); st = mk_to_sbv_unspecified(f, result); break;
     case OP_FPA_INTERNAL_TO_REAL_UNSPECIFIED:
         SASSERT(num_args == 0); st = mk_to_real_unspecified(result); break;
+    case OP_FPA_INTERNAL_TO_IEEE_BV_UNSPECIFIED:
+        SASSERT(num_args == 0); st = mk_to_ieee_bv_unspecified(f, result); break;
 
     case OP_FPA_INTERNAL_BVWRAP:
     case OP_FPA_INTERNAL_BVUNWRAP:
@@ -150,11 +152,9 @@ br_status fpa_rewriter::mk_to_sbv_unspecified(func_decl * f, expr_ref & result) 
 }
 
 br_status fpa_rewriter::mk_to_ieee_bv_unspecified(func_decl * f, expr_ref & result) {
-    SASSERT(f->get_num_parameters() == 1);
-    SASSERT(f->get_parameter(0).is_int());
-    unsigned bv_sz = f->get_parameter(0).get_int();
-
     bv_util bu(m());
+    unsigned bv_sz = bu.get_bv_size(f->get_range());
+
     if (m_hi_fp_unspecified)
         // The "hardware interpretation" is 0.
         result = bu.mk_numeral(0, bv_sz);
