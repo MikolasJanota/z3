@@ -27,6 +27,8 @@
 #include"bv_ternary_tactic.h"
 #include"ctx_simplify_tactic.h"
 ///////////////
+#include"expr_gen.h"
+
 class prepro_mine_tactic : public tactic {
     ast_manager&    m_m;
     params_ref      m_params;
@@ -44,6 +46,7 @@ public:
         tactic_report report("prepro-mine", *g);
         mc = 0;
         ast_manager& m(g->m());
+        //test_expr_gen(m);
         TRACE("miner", g->display(tout << "Goal:\n"););
         // conflate all assertions into one conjunction
         ptr_vector<expr> flas;

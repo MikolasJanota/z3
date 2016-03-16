@@ -26,6 +26,9 @@
 #include"qfaufbv_tactic.h"
 #include"tactic.h"
 #include"solver.h"
+#include"expr_gen.h"
+#include"for_each_ast.h"
+#include"th_rewriter.h"
 
 //#define __PL std::cout << __FILE__ << ":" << __LINE__ << "\n";
 //#define __PL tout << __FILE__ << ":" << __LINE__ << "\n";
@@ -43,7 +46,11 @@ public:
         , m_esort(esort)
         , m_n(n)
         , m_collected(m)
+       , m_exact(false)
     {}
+
+    bool m_exact;
+    void set_exact(bool e) { m_exact = e; }
 
     expr_ref_vector&   collected() {
         return m_collected;
@@ -61,10 +68,9 @@ public:
                 switch (n->get_kind()) {
                 case AST_APP: {
                     app * a = to_app(n);
-                    if (a->get_decl()->get_range()->get_family_id()
-                        == m_esort->get_family_id()) {
-                        m_collected.push_back(a);
-                    }
+                    sort * as =  a->get_decl()->get_range();
+                    const bool p = m_exact ? as == m_esort : as->get_family_id()==m_esort->get_family_id();
+                    if (p) m_collected.push_back(a);
                     for (unsigned i = 0; i < a->get_num_args(); ++i) {
                         todo.push_back(a->get_arg(i));
                     }
@@ -111,6 +117,7 @@ struct miner::imp {
         m_print = _print;
     }
 
+    void mine_term_bf(app * term);
     void mine_term(app * term);
 
     void make_values(app* a, expr_ref_vector& a_values) {
@@ -315,7 +322,7 @@ struct miner::imp {
                                                a->get_num_args(), a->get_args())) {
                             visited.mark(a, true);
                             stack.pop_back();
-                            mine_term(a);
+                            mine_term_bf(a);
                         }
                     }
                     break;
@@ -414,6 +421,67 @@ struct miner::imp {
     }
 };
 
+
+void miner::imp::mine_term_bf(app * term) {
+    if (term->get_depth() > 5) return; //TODO: introduce a parameter
+    if (is_val(term)) return;
+    if (term->get_num_args() == 0) return;
+    if (!m_bv_util.is_bv(term)) return;// for now only check bit vectors
+
+    expr_ref_vector term_values(m_m);
+    make_values(term, term_values);
+
+    expr_collector  collector(m_m, term->get_decl()->get_range(), term);
+    collector.set_exact(true);
+    collector.visit();
+    expr_ref_vector exprs = collector.collected();
+    unsigned i = 0;
+    while (i < exprs.size()) {
+        expr * e = exprs.get(i);
+        const bool del = !is_app(e) || to_app(e)->get_num_args();
+        if (del) {
+            exprs[i] = exprs.back();
+            exprs.pop_back();
+        }
+        else {
+            ++i;
+        }
+    }
+
+
+	const unsigned bv_sz = m_bv_util.get_bv_size(term);
+    bool done = false;
+    const unsigned B = 20;
+    expr_ref tested_expression(m_m);
+    const unsigned term_size = get_num_nodes(term);
+    unsigned min_size = term_size;
+    TRACE("miner", tout << "mining: " << mk_ismt2_pp(term, m_m, 2) << "(" << term_size << ")" << std::endl;);
+    std::cout << "mining: " << mk_ismt2_pp(term, m_m, 2) << "(" << term_size << ")" << std::endl;
+    th_rewriter tr(m_m);
+    expr_gen* eg = mk_expr_gen(m_m, 3, bv_sz, exprs);
+    while (!done) {
+        const bool s = eg->gen(tested_expression);
+        unsigned budget = min_size;
+        done = (eg->inc(budget));
+        if(done) break;
+
+        if (m_m.are_equal(tested_expression.get(), term)) continue;
+        //tr(tested_expression);
+        const unsigned   tested_size = get_num_nodes(tested_expression.get());
+        //std::cout << "sz: " << term_size << "  " << tested_size << " "  << min_size<< std::endl;
+        if (min_size <= tested_size)  continue;
+        TRACE("miner", tout << "testing: " << mk_ismt2_pp(tested_expression.get(), m_m, 2) << "(" <<  tested_size <<  ")" << std::endl;);
+        if (check_equality(term, term_values, tested_expression) == l_true) {
+            std::cout << "cost: " << term_size << " -> " <<tested_size << std::endl;
+            min_size = tested_size;
+            if (m_print) std::cout << "rewrite: "
+                << mk_ismt2_pp(term, m_m, 2) << "->"
+                    << mk_ismt2_pp(tested_expression, m_m, 2)
+                    << std::endl;
+        }
+    }
+    dealloc(eg);
+}
 
 void miner::imp::mine_term(app * term) {
     SASSERT(term);
