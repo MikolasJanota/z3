@@ -196,4 +196,5 @@ void test_expr_gen(ast_manager& m) {
         done = (eg->inc(budget));
         if (!done) std::cout << "cost: " << (B - budget) << std::endl;
     };
+    dealloc(eg);
 }
