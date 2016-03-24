@@ -23,15 +23,16 @@
 #include"bool_rewriter.h"
 #include"cooperate.h"
 
-struct bv_bound_chk_stats {    
+struct bv_bound_chk_stats {
     unsigned            m_unsats;
-    bv_bound_chk_stats() : m_unsats(0) {};
+    unsigned            m_singletons;
+    bv_bound_chk_stats() : m_unsats(0), m_singletons(0) {};
 };
 
 struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     ast_manager &       m_m;
-    unsigned            m_bv_ineq_consistency_test_max;    
-    bool_rewriter       m_b_rw;
+    unsigned                 m_bv_ineq_consistency_test_max;
+    bool_rewriter         m_b_rw;
     unsigned long long  m_max_steps;
     unsigned long long  m_max_memory; // in bytes
     bv_bound_chk_stats& m_stats;
@@ -57,6 +58,15 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     bool flat_assoc(func_decl * f) const { return true; }
 
     br_status reduce_app(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
+        const br_status st = reduce_app_core(f, num, args, result, result_pr);
+        CTRACE("bv_bound_chk_step", st != BR_FAILED,
+            tout << f->get_name() << "\n";
+        for (unsigned i = 0; i < num; i++) tout << mk_ismt2_pp(args[i], m()) << "\n";
+        tout << "---------->\n" << mk_ismt2_pp(result, m()) << "\n";);
+        return st;
+    }
+
+    br_status reduce_app_core(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
         result_pr = 0;
         const family_id fid = f->get_family_id();
         if (fid != m_b_rw.get_fid()) return BR_FAILED;
@@ -65,10 +75,23 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
             bv_bounds bvb(m());
             for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
             if (!bvb.is_sat()) {
-                //std::cout << __FILE__ << ":" << __LINE__ << "\n";
-                //std::cout << "unsat bv bounds:" << m_stats.m_unsats << "\n";
-                m_stats.m_unsats++;                
+                m_stats.m_unsats++;
                 result = m_m.mk_false();
+                return BR_DONE;
+            }
+            const bv_bounds::bound_map& singletons = bvb.singletons();
+            expr_ref_vector nargs(m_m);
+            expr_ref eq(m_m);
+            for (bv_bounds::bound_map::iterator i = singletons.begin(); i != singletons.end(); ++i) {
+                app * const v = i->m_key;
+                const rational val = i->m_value;
+                eq = m_m.mk_eq(v, bvb.bvu().mk_numeral(val, v->get_decl()->get_range()));
+                nargs.push_back(eq);
+            }
+            if (!nargs.empty()) {
+                m_stats.m_singletons++;
+                nargs.append(num, args);
+                result = m_m.mk_and(nargs.size(), nargs.c_ptr());
                 return BR_DONE;
             }
         }
@@ -86,11 +109,12 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
 
     void reset_statistics() {
         m_stats.m_unsats = 0;
+        m_stats.m_singletons = 0;
     }
 
-
     void collect_statistics(statistics & st) const {
-        st.update("unsat bv bounds", m_stats.m_unsats);        
+        st.update("unsat bv bounds", m_stats.m_unsats);
+        st.update("bv singletons", m_stats.m_singletons);
     }
 };
 
