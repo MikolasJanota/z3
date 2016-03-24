@@ -33,6 +33,7 @@ class bv_bounds {
 public:
     typedef rational numeral;
     typedef std::pair<numeral, numeral> interval;
+    typedef obj_map<app, numeral>       bound_map;
     bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {};
     ~bv_bounds();
 public: // bounds addition methods
@@ -53,19 +54,22 @@ public: // bounds addition methods
 public:
     bool is_sat();  ///< Determine if the set of considered constraints is satisfiable.
     bool is_okay();
+    const bound_map& singletons() { return m_singletons; }
+    bv_util& bvu() { return m_bv_util;  }
 protected:
     typedef vector<interval>            intervals;
     typedef obj_map<app, intervals*>    intervals_map;
-    typedef obj_map<app, numeral>       bound_map;
     ast_manager&              m_m;
     bound_map                 m_unsigned_lowers;
     bound_map                 m_unsigned_uppers;
     intervals_map             m_negative_intervals;
+    bound_map                 m_singletons;
     bv_util                   m_bv_util;
     bool                      m_okay;
     bool                      is_sat(app * v);
     inline bool               in_range(app *v, numeral l);
     inline bool               is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val);
+    void                      record_singleton(app * v,  numeral& singleton_value);
 };
 
 
