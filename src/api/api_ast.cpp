@@ -832,7 +832,7 @@ extern "C" {
             pp_params params;
             pp.set_simplify_implies(params.simplify_implies());
             ast* a1 = to_ast(a);
-            pp.set_logic(mk_c(c)->fparams().m_smtlib_logic.c_str());
+            pp.set_logic(mk_c(c)->fparams().m_logic);
             if (!is_expr(a1)) {
                 buffer << mk_pp(a1, mk_c(c)->m());
                 break;
@@ -880,7 +880,7 @@ extern "C" {
         std::ostringstream buffer;
         ast_smt_pp pp(mk_c(c)->m());
         pp.set_benchmark_name(name);
-        pp.set_logic(logic);
+        pp.set_logic(logic?symbol(logic):symbol::null);
         pp.set_status(status);
         pp.add_attributes(attributes);
         pp_params params;
@@ -1129,7 +1129,7 @@ extern "C" {
             case Z3_OP_SEQ_INDEX: return Z3_OP_SEQ_INDEX;
             case Z3_OP_SEQ_TO_RE: return Z3_OP_SEQ_TO_RE;
             case Z3_OP_SEQ_IN_RE: return Z3_OP_SEQ_IN_RE;
-                    
+
             case Z3_OP_RE_PLUS: return Z3_OP_RE_PLUS;
             case Z3_OP_RE_STAR: return Z3_OP_RE_STAR;
             case Z3_OP_RE_OPTION: return Z3_OP_RE_OPTION;
@@ -1186,9 +1186,14 @@ extern "C" {
             case OP_FPA_TO_IEEE_BV: return Z3_OP_FPA_TO_IEEE_BV;
             case OP_FPA_INTERNAL_BVWRAP:
             case OP_FPA_INTERNAL_BVUNWRAP:
+            case OP_FPA_INTERNAL_MIN_I:
+            case OP_FPA_INTERNAL_MAX_I:
+            case OP_FPA_INTERNAL_MIN_UNSPECIFIED:
+            case OP_FPA_INTERNAL_MAX_UNSPECIFIED:
             case OP_FPA_INTERNAL_TO_UBV_UNSPECIFIED:
             case OP_FPA_INTERNAL_TO_SBV_UNSPECIFIED:
             case OP_FPA_INTERNAL_TO_REAL_UNSPECIFIED:
+            case OP_FPA_INTERNAL_TO_IEEE_BV_UNSPECIFIED:
                 return Z3_OP_UNINTERPRETED;
             default:
                 UNREACHABLE();
