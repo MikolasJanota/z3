@@ -69,6 +69,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_udiv2mul;
     bool       m_bvnot2arith;
     bool       m_bv_sort_ac;
+    bool       m_bvnot_simpl;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -85,6 +86,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_repeat(unsigned n, expr * arg, expr_ref & result);
     br_status mk_zero_extend(unsigned n, expr * arg, expr_ref & result);
     br_status mk_sign_extend(unsigned n, expr * arg, expr_ref & result);
+    bool is_negatable(expr * arg, expr_ref& x);
     br_status mk_bv_not(expr * arg, expr_ref & result);
     br_status mk_bv_or(unsigned num, expr * const * args, expr_ref & result);
     br_status mk_bv_xor(unsigned num, expr * const * args, expr_ref & result);
