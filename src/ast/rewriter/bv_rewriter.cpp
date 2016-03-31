@@ -1594,9 +1594,10 @@ br_status bv_rewriter::mk_bv_not(expr * arg, expr_ref & result) {
         if (m_util.is_bv_add(arg, s, t)) {
             expr_ref ns(m());
             expr_ref nt(m());
-            bv_size = m_util.get_bv_size(s);
+            // ~(x + y) --> (~x + ~y + 1) when x and y are easy to negate
             if (is_negatable(t, nt) && is_negatable(s, ns)) {
-                expr * nargs[3] = { ns.get(), nt.get() ,  m_util.mk_numeral(rational::one(), bv_size) };
+                bv_size = m_util.get_bv_size(s);
+                expr * nargs[3] = { m_util.mk_numeral(rational::one(), bv_size), ns.get(), nt.get() };
                 result = m().mk_app(m_util.get_fid(), OP_BADD, 3, nargs);
                 return BR_REWRITE1;
             }
