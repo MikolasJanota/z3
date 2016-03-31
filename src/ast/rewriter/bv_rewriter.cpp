@@ -60,6 +60,7 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_hi_div0 = p.hi_div0();
     m_elim_sign_ext = p.elim_sign_ext();
     m_mul2concat = p.mul2concat();
+    m_gcd_test = p.bv_gcd_test();
     m_bit2bool = p.bit2bool();
     m_blast_eq_value = p.blast_eq_value();
     m_split_concat_eq = p.split_concat_eq();
@@ -2038,44 +2039,101 @@ bool bv_rewriter::has_numeral(app* a) const {
     return false;
 }
 
+// Test if there is an x s.t. x * c = rhs (mod 2^sz)
+// assuming that 0 <= c, rhs < 2^sz
+bool bv_rewriter::is_divisible(unsigned sz, numeral c, numeral rhs) {
+    SASSERT(c.is_nonneg() && c < rational::power_of_two(sz));
+    numeral two(2);
+    for (unsigned i=0; i < sz; ++i) {
+        if (!c.is_even()) return true;
+        if (!rhs.is_even())  return false;
+        div(c, two, c);
+        div(rhs, two, rhs);
+    }
+    SASSERT(c.is_zero() && rhs.is_zero());
+    return true;
+}
+
+br_status bv_rewriter::mk_rem_eq(expr * lhs, expr * rhs, expr_ref & result) {
+    expr *s1(0), *s2(0), *t1(0), *t2(0);
+    numeral t1_val, t2_val;
+    unsigned sz1, sz2;
+    if (m_util.is_bv_urem(lhs, s1, t2)
+        && m_util.is_bv_urem(lhs, s1, t2)
+        && is_numeral(t1, t1_val, sz1)
+        && is_numeral(t2, t2_val, sz2)
+        && (t1_val == t2_val)
+        && !t1_val.is_zero()
+        ) {
+        SASSERT(sz1 == sz2);
+        expr * x(0), *c(0);
+        bool rew = (m_util.is_bv_mul(s1, x, c) && c == s2)
+                         || (m_util.is_bv_mul(s2, x, c) && c == s1);
+        numeral c_val;
+        unsigned sz3;
+        rew &= is_numeral(c, c_val, sz3);
+        SASSERT(sz1 == sz3);
+        if (rew) {
+            const numeral s = numeral::power_of_two(sz1);
+            const bool  dc = mod(c_val, t1_val) == numeral::zero();
+            const bool  dnc = mod(s - c_val, t1_val) == numeral::zero();
+            if (!dc && !dnc) {
+                result = m().mk_false();
+                return BR_DONE;
+            }
+        }
+    }
+    return BR_FAILED;
+}
+
 br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
 
     expr * c, * x;
     numeral c_val, c_inv_val;
     unsigned sz;
     if (m_util.is_bv_mul(lhs, c, x) &&
-        m_util.is_numeral(c, c_val, sz) &&
-        m_util.mult_inverse(c_val, sz, c_inv_val)) {
+            m_util.is_numeral(c, c_val, sz)) {
+        if (m_util.mult_inverse(c_val, sz, c_inv_val)) {
 
-        SASSERT(m_util.norm(c_val * c_inv_val, sz).is_one());
+            SASSERT(m_util.norm(c_val * c_inv_val, sz).is_one());
 
-        numeral rhs_val;
-        // c * x = a
-        if (m_util.is_numeral(rhs, rhs_val, sz)) {
-            // x = c_inv * a
-            result = m().mk_eq(x, m_util.mk_numeral(c_inv_val * rhs_val, sz));
-            return BR_REWRITE1;
+            numeral rhs_val;
+            // c * x = a
+            if (m_util.is_numeral(rhs, rhs_val, sz)) {
+                // x = c_inv * a
+                result = m().mk_eq(x, m_util.mk_numeral(c_inv_val * rhs_val, sz));
+                return BR_REWRITE1;
+            }
+
+            expr * c2, * x2;
+            numeral c2_val;
+            // c * x = c2 * x2
+            if (m_util.is_bv_mul(rhs, c2, x2) && m_util.is_numeral(c2, c2_val, sz)) {
+                // x = c_inv * c2 * x2
+                numeral new_c2 = m_util.norm(c_inv_val * c2_val, sz);
+                if (new_c2.is_one())
+                    result = m().mk_eq(x, x2);
+                else
+                    result = m().mk_eq(x, m_util.mk_bv_mul(m_util.mk_numeral(c_inv_val * c2_val, sz), x2));
+                return BR_REWRITE1;
+            }
+
+            // c * x =  t_1 + ... + t_n
+            // and t_i's have non-unary coefficients (this condition is used to make sure we are actually reducing the number of multipliers).
+            if (is_add_mul_const(rhs)) {
+                // Potential problem: this simplification may increase the number of adders by reducing the amount of sharing.
+                result = m().mk_eq(x, m_util.mk_bv_mul(m_util.mk_numeral(c_inv_val, sz), rhs));
+                return BR_REWRITE2;
+            }
         }
-
-        expr * c2, * x2;
-        numeral c2_val;
-        // c * x = c2 * x2
-        if (m_util.is_bv_mul(rhs, c2, x2) && m_util.is_numeral(c2, c2_val, sz)) {
-            // x = c_inv * c2 * x2
-            numeral new_c2 = m_util.norm(c_inv_val * c2_val, sz);
-            if (new_c2.is_one())
-                result = m().mk_eq(x, x2);
-            else
-                result = m().mk_eq(x, m_util.mk_bv_mul(m_util.mk_numeral(c_inv_val * c2_val, sz), x2));
-            return BR_REWRITE1;
-        }
-
-        // c * x =  t_1 + ... + t_n
-        // and t_i's have non-unary coefficients (this condition is used to make sure we are actually reducing the number of multipliers).
-        if (is_add_mul_const(rhs)) {
-            // Potential problem: this simplification may increase the number of adders by reducing the amount of sharing.
-            result = m().mk_eq(x, m_util.mk_bv_mul(m_util.mk_numeral(c_inv_val, sz), rhs));
-            return BR_REWRITE2;
+        else {
+            numeral rhs_val;
+            if (m_gcd_test && m_util.is_numeral(rhs, rhs_val, sz)) { // GCD test
+                if (!is_divisible(sz, c_val, rhs_val)) { // c * x = a
+                    result = m().mk_false();
+                    return BR_DONE;
+                }
+            }
         }
     }
     if (m_util.is_numeral(lhs, c_val, sz) && is_add_mul_const(rhs)) {

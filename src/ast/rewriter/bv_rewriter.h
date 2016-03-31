@@ -62,6 +62,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_hi_div0;
     bool       m_elim_sign_ext;
     bool       m_mul2concat;
+    bool       m_gcd_test;
     bool       m_bit2bool;
     bool       m_blast_eq_value;
     bool       m_mkbv2num;
@@ -136,6 +137,8 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
 
     bool is_concat_split_target(expr * t) const;
 
+    br_status mk_rem_eq(expr * lhs, expr * rhs, expr_ref & result);
+    bool is_divisible(unsigned sz, numeral c_val, numeral rhs_val);
     br_status mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result);
     bool is_add_mul_const(expr* e) const;
     bool isolate_term(expr* lhs, expr* rhs, expr_ref & result);
