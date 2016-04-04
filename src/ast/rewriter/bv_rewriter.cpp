@@ -2040,9 +2040,13 @@ bool bv_rewriter::has_numeral(app* a) const {
 }
 
 // Test if there is an x s.t. x * c = rhs (mod 2^sz)
-// assuming that 0 <= c, rhs < 2^sz
+// assuming that 0 <= c < 2^sz, 0 <= rhs < 2^sz
 bool bv_rewriter::is_divisible(unsigned sz, numeral c, numeral rhs) {
-    SASSERT(c.is_nonneg() && c < rational::power_of_two(sz));
+    if (rhs.is_zero()) return true; // set x=0
+    if (c.is_zero()) return false;  // now rhs!=0, while x*c=0
+    SASSERT(c.is_pos() && c < rational::power_of_two(sz));
+    SASSERT(rhs.is_pos() && rhs< rational::power_of_two(sz));
+    
     numeral two(2);
     for (unsigned i=0; i < sz; ++i) {
         if (!c.is_even()) return true;
@@ -2130,8 +2134,12 @@ br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
             numeral rhs_val;
             if (m_gcd_test && m_util.is_numeral(rhs, rhs_val, sz)) { // GCD test
                 if (!is_divisible(sz, c_val, rhs_val)) { // c * x = a
+                    //std::cout << "GCD " << c_val << " " << rhs_val << " not div [" << sz << "]\n";
                     result = m().mk_false();
                     return BR_DONE;
+                }
+                else {
+                    //std::cout << "GCD " << c_val << " " << rhs_val << " may div [" << sz << "]\n";
                 }
             }
         }
