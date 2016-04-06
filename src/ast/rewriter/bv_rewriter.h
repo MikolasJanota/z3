@@ -61,6 +61,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_bvnot2arith;
     bool       m_bv_sort_ac;
     bool       m_trailing;
+    bool       m_extract_prop;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -73,6 +74,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref & result);
 
     br_status mk_concat(unsigned num_args, expr * const * args, expr_ref & result);
+    unsigned propagate_extract(unsigned high,  expr * arg, expr_ref & result);
     br_status mk_extract(unsigned high, unsigned low, expr * arg, expr_ref & result);
     br_status mk_repeat(unsigned n, expr * arg, expr_ref & result);
     br_status mk_zero_extend(unsigned n, expr * arg, expr_ref & result);

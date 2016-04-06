@@ -35,6 +35,7 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_bvnot2arith = p.bvnot2arith();
     m_bv_sort_ac = p.bv_sort_ac();
     m_mkbv2num = _p.get_bool("mkbv2num", false);
+    m_extract_prop = p.bv_extract_prop();
 }
 
 void bv_rewriter::updt_params(params_ref const & p) {
@@ -360,6 +361,85 @@ br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref 
     return BR_FAILED;
 }
 
+// attempt to chop off bits that are above high for  bv_mul and bv_add
+// e.g.  (bvadd(concat #b11 p) #x1)) with high=1, returns 2 and  sets result = p + #b01
+// the sz of results is the sz of arg minus the return value
+unsigned bv_rewriter::propagate_extract(unsigned high, expr * arg, expr_ref & result) {
+    if (!m_util.is_bv_add(arg) && !m_util.is_bv_mul(arg))
+        return 0;
+    const unsigned sz = m_util.get_bv_size(arg);
+    const unsigned to_remove = high + 1 < sz ? sz - high - 1 : 0;
+    if (to_remove == 0)
+        return 0; // high goes to the top, nothing to do
+    const app * const a = to_app(arg);
+    const unsigned num = a->get_num_args();
+    bool all_numerals = true;
+    unsigned removable = to_remove;
+    numeral val;
+    unsigned curr_first_sz = -1;
+    for (unsigned i = 0; i < num; i++) {
+        expr * const curr = a->get_arg(i);
+        const bool curr_is_conc = m_util.is_concat(curr);
+        if (curr_is_conc && to_app(curr)->get_num_args() == 0) continue;
+        expr * const curr_first = curr_is_conc ? to_app(curr)->get_arg(0) : curr;
+        if (!all_numerals) {
+            if (removable != m_util.get_bv_size(curr_first))
+                return 0;
+            continue;
+        }
+        if (is_numeral(curr_first, val, curr_first_sz)) {
+            removable = std::min(removable, curr_first_sz);
+        } else {
+            all_numerals = false;
+            curr_first_sz = m_util.get_bv_size(curr_first);
+            if (curr_first_sz > removable) return 0;
+            removable = curr_first_sz;
+        }
+        if (removable == 0) return 0;
+    }
+    SASSERT(removable <= to_remove);
+    const unsigned new_sz = sz - removable;
+    ptr_buffer<expr> new_args;
+    ptr_buffer<expr> new_concat_args;
+    for (unsigned i = 0; i < num; i++) {
+        expr * const curr = a->get_arg(i);
+        const bool curr_is_conc = m_util.is_concat(curr);
+        if (curr_is_conc && to_app(curr)->get_num_args() == 0) continue;
+        expr * const curr_first = curr_is_conc ? to_app(curr)->get_arg(0) : curr;
+        expr * new_first = NULL;
+        if (is_numeral(curr_first, val, curr_first_sz)) {
+            SASSERT(curr_first_sz >= removable);
+            const unsigned new_num_sz = curr_first_sz - removable;
+            new_first = new_num_sz ? mk_numeral(val, new_num_sz) : NULL;
+        }
+        expr * new_arg = NULL;
+        if (curr_is_conc) {
+            const unsigned conc_num = to_app(curr)->get_num_args();
+            if (new_first) {
+                new_concat_args.reset();
+                new_concat_args.push_back(new_first);
+                for (unsigned j = 1; j < conc_num; ++j)
+                    new_concat_args.push_back(to_app(curr)->get_arg(j));
+                new_arg = m_util.mk_concat(new_concat_args.size(), new_concat_args.c_ptr());
+            } else {
+                // remove first element of concat
+                expr * const * const old_conc_args = to_app(curr)->get_args();
+                switch (conc_num) {
+                    case 0: UNREACHABLE(); break;
+                    case 1: new_arg = NULL; break;
+                    case 2: new_arg = to_app(curr)->get_arg(1); break;
+                    default: new_arg = m_util.mk_concat(conc_num - 1, old_conc_args + 1);
+                }
+            }
+        } else {
+            new_arg = new_first;
+        }
+        if (new_arg) new_args.push_back(new_arg);
+    }
+    result = m().mk_app(get_fid(), a->get_decl()->get_decl_kind(), new_args.size(), new_args.c_ptr());
+    return removable;
+}
+
 br_status bv_rewriter::mk_extract(unsigned high, unsigned low, expr * arg, expr_ref & result) {
     unsigned sz = get_bv_size(arg);
     SASSERT(sz > 0);
@@ -461,6 +541,15 @@ br_status bv_rewriter::mk_extract(unsigned high, unsigned low, expr * arg, expr_
         }
         result = m().mk_app(get_fid(), to_app(arg)->get_decl()->get_decl_kind(), new_args.size(), new_args.c_ptr());
         return BR_REWRITE2;
+    }
+
+    if (m_extract_prop && (high >= low)) {
+        expr_ref ep_res(m());
+        const unsigned ep_rm = propagate_extract(high, arg, ep_res);
+        if (ep_rm != 0) {
+            result = m_mk_extract(high, low, ep_res);
+            return BR_REWRITE2;
+        }
     }
 
     if (m().is_ite(arg)) {
