@@ -33,6 +33,7 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_split_concat_eq = p.split_concat_eq();
     m_udiv2mul = p.udiv2mul();
     m_bvnot2arith = p.bvnot2arith();
+    m_bvnot_simpl = p.bvnot_simpl();
     m_bv_sort_ac = p.bv_sort_ac();
     m_mkbv2num = _p.get_bool("mkbv2num", false);
     m_concat_fusion = p.bv_concat_fusion();
@@ -926,6 +927,22 @@ bool bv_rewriter::is_minus_one_core(expr * arg) const {
     return false;
 }
 
+bool bv_rewriter::is_negatable(expr * arg, expr_ref& x) {
+    numeral r;
+    unsigned bv_size;
+    if (is_numeral(arg, r, bv_size)) {
+        r = bitwise_not(bv_size, r);
+        x = mk_numeral(r, bv_size);
+        return true;
+    }
+    if (m_util.is_bv_not(arg)) {
+        SASSERT(to_app(arg)->get_num_args() == 1);
+        x =  to_app(arg)->get_arg(0);
+        return true;
+    }
+    return false;
+}
+
 bool bv_rewriter::is_x_minus_one(expr * arg, expr * & x) {
     if (is_add(arg) && to_app(arg)->get_num_args() == 2) {
         if (is_minus_one_core(to_app(arg)->get_arg(0))) {
@@ -1671,6 +1688,35 @@ br_status bv_rewriter::mk_bv_not(expr * arg, expr_ref & result) {
         rational minus_one = (rational::power_of_two(bv_size) - numeral(1));
         result = m_util.mk_bv_sub(m_util.mk_numeral(minus_one, bv_size), arg);
         return BR_REWRITE1;
+    }
+
+    if (m_bvnot_simpl) {
+        expr *s(0), *t(0);
+        if (m_util.is_bv_mul(arg, s, t)) {
+            // ~(-1 * x) --> (x - 1)
+            bv_size = m_util.get_bv_size(s);
+            if (m_util.is_allone(s)) {
+                rational minus_one = (rational::power_of_two(bv_size) - rational::one());
+                result = m_util.mk_bv_add(m_util.mk_numeral(minus_one, bv_size), t);
+                return BR_REWRITE1;
+            }
+            if (m_util.is_allone(t)) {
+                rational minus_one = (rational::power_of_two(bv_size) - rational::one());
+                result = m_util.mk_bv_add(m_util.mk_numeral(minus_one, bv_size), s);
+                return BR_REWRITE1;
+            }
+        }
+        if (m_util.is_bv_add(arg, s, t)) {
+            expr_ref ns(m());
+            expr_ref nt(m());
+            // ~(x + y) --> (~x + ~y + 1) when x and y are easy to negate
+            if (is_negatable(t, nt) && is_negatable(s, ns)) {
+                bv_size = m_util.get_bv_size(s);
+                expr * nargs[3] = { m_util.mk_numeral(rational::one(), bv_size), ns.get(), nt.get() };
+                result = m().mk_app(m_util.get_fid(), OP_BADD, 3, nargs);
+                return BR_REWRITE1;
+            }
+        }
     }
 
     return BR_FAILED;
