@@ -56,6 +56,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_bit2bool;
     bool       m_blast_eq_value;
     bool       m_mkbv2num;
+    bool       m_ite2id;
     bool       m_split_concat_eq;
     bool       m_udiv2mul;
     bool       m_bvnot2arith;
@@ -173,6 +174,7 @@ public:
     bool has_bound_u(expr * e, numeral& l, numeral& h);
 
     br_status mk_eq_core(expr * lhs, expr * rhs, expr_ref & result);
+    br_status mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resul);
 
     bool hi_div0() const { return m_hi_div0; }
 
