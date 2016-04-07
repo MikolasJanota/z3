@@ -33,11 +33,12 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_split_concat_eq = p.split_concat_eq();
     m_udiv2mul = p.udiv2mul();
     m_bvnot2arith = p.bvnot2arith();
-    m_bvnot_simpl = p.bvnot_simpl();
+    m_bvnot_simpl = p.bv_not_simpl();
     m_bv_sort_ac = p.bv_sort_ac();
     m_mkbv2num = _p.get_bool("mkbv2num", false);
     m_concat_fusion = p.bv_concat_fusion();
     m_extract_prop = p.bv_extract_prop();
+    m_ite2id = p.bv_ite2id();
 }
 
 void bv_rewriter::updt_params(params_ref const & p) {
@@ -2375,6 +2376,54 @@ br_status bv_rewriter::mk_mkbv(unsigned num, expr * const * args, expr_ref & res
         }
         result = mk_numeral(val, num);
         return BR_DONE;
+    }
+    return BR_FAILED;
+}
+
+br_status bv_rewriter::mk_ite_core(expr * c, expr * t, expr * e, expr_ref & result) {
+    TRACE("bv_ite", tout << "mk_ite_core:\n" << mk_ismt2_pp(c, m()) << "?\n"
+            << mk_ismt2_pp(t, m()) << "\n:" << mk_ismt2_pp(e, m()) << "\n";);
+    if (m().are_equal(t, e)) {
+        result = e;
+        return BR_REWRITE1;
+    }
+    if (m().is_not(c)) {
+        result = m().mk_ite(to_app(c)->get_arg(0), e, t);
+        return BR_REWRITE1;
+    }
+
+    if (m_ite2id && m().is_eq(c) && is_bv(t) && is_bv(e)) {
+        expr * lhs = to_app(c)->get_arg(0);
+        expr * rhs = to_app(c)->get_arg(1);
+
+        if (is_bv(rhs)) {
+            if (is_numeral(lhs))
+                std::swap(lhs, rhs);
+
+            if (   (m().are_equal(lhs, t) && m().are_equal(rhs, e))
+                || (m().are_equal(lhs, e) && m().are_equal(rhs, t))) {
+                // (a = b ? a : b) is b.  (a = b ? b : a) is a
+                result = e;
+                return BR_REWRITE1;
+            }
+
+            const unsigned sz = m_util.get_bv_size(rhs);
+            if (sz == 1) {
+                numeral rhs_n, e_n, t_n;
+                unsigned rhs_sz, e_sz, t_sz;
+                if (is_numeral(rhs, rhs_n, rhs_sz)
+                    && is_numeral(t, t_n, t_sz) && is_numeral(e, e_n, e_sz)) {
+                    if (t_sz == 1) {
+                        SASSERT(rhs_sz == sz && e_sz == sz && t_sz == sz);
+                        SASSERT(!m().are_equal(t, e));
+                        result = m().are_equal(rhs, t) ? lhs : m_util.mk_bv_not(lhs);
+                        return BR_REWRITE1;
+                    }
+                }
+            }
+        }
+
+
     }
     return BR_FAILED;
 }

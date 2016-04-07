@@ -22,6 +22,7 @@
 #include"bool_rewriter.h"
 #include"cooperate.h"
 #include"bv_ternary_simplifier.h"
+#include"bv_rewriter_params.hpp"
 
 class bv_ternary_tactic : public tactic {
     class imp;
@@ -46,9 +47,14 @@ public:
 class bv_ternary_tactic::imp {
     bv_ternary_simplifier      m_rw;
     //bv_ternary_stats&           m_stats;
+    bool                       m_use_ternary;
 public:
     imp(ast_manager & m, params_ref const & p, bv_ternary_stats& stats)
-        : m_rw(m, p, stats) {    }
+    : m_rw(m, p, stats)
+    {
+        bv_rewriter_params bvp(p);
+        m_use_ternary = bvp.bv_use_ternary();
+    }
 
     virtual ~imp() {    }
 
@@ -57,6 +63,9 @@ public:
     void operator()(goal_ref const & g) {
         SASSERT(g->is_well_sorted());
         tactic_report report("bv_ternary", *g);
+        if (!m_use_ternary) { // Just pass on the input unchanged
+            return;
+        }
         ast_manager& m(g->m());
         expr_ref   new_curr(m);
         const unsigned size = g->size();
