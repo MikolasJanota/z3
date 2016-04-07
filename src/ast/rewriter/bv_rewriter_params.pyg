@@ -12,6 +12,7 @@ def_module_params(module_name='rewriter',
                           ("bv_sort_ac", BOOL, False, "sort the arguments of all AC operators"),
                           ("bv_trailing", BOOL, False, "lean removal of trailing zeros"),
                           ("bv_concat_fusion", BOOL, False, "attempt fusion of concat for some non-trivial cases"),
-                          ("bv_extract_prop", BOOL, False, "attempt to partially propagate extraction inwards")
-                          ("bvnot_simpl", BOOL, False, "apply simplifications for bvnot")
+                          ("bv_extract_prop", BOOL, False, "attempt to partially propagate extraction inwards"),
+                          ("bvnot_simpl", BOOL, False, "apply simplifications for bvnot"),
+                          ("bv_use_ternary", BOOL, False, "enable the ternary tactic")
                           ))
