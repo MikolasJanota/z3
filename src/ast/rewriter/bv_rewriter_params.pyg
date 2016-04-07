@@ -11,5 +11,6 @@ def_module_params(module_name='rewriter',
                           ("bvnot2arith", BOOL, False, "replace (bvnot x) with (bvsub -1 x)"),
                           ("bv_sort_ac", BOOL, False, "sort the arguments of all AC operators"),
                           ("bv_trailing", BOOL, False, "lean removal of trailing zeros"),
-                          ("bv_concat_fusion", BOOL, False, "attempt fusion of concat for some non-trivial cases")
+                          ("bv_concat_fusion", BOOL, False, "attempt fusion of concat for some non-trivial cases"),
+                          ("bv_extract_prop", BOOL, False, "attempt to partially propagate extraction inwards")
                           ))
