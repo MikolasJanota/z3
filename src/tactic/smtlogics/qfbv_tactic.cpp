@@ -30,6 +30,8 @@ Notes:
 #include"sat_tactic.h"
 #include"ackermannize_bv_tactic.h"
 #include"bv_ternary_tactic.h"
+#include"bv_bound_chk_tactic.h"
+#include"ackermannize_bv_tactic.h"
 
 #define MEMLIMIT 300
 
@@ -54,6 +56,7 @@ tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p) {
 
     return
         and_then(
+            if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
             mk_simplify_tactic(m),
             mk_propagate_values_tactic(m),
             using_params(mk_solve_eqs_tactic(m), solve_eq_p),
