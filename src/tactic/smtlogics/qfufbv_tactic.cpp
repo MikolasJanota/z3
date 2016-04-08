@@ -40,6 +40,7 @@ Notes:
 #include"qfbv_tactic.h"
 #include"tactic2solver.h"
 ///////////////
+#include"bv_bound_chk_tactic.h"
 
 class qfufbv_ackr_tactic : public tactic {
 public:
@@ -148,6 +149,7 @@ static tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p) {
 
     return and_then(
         mk_simplify_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
         mk_propagate_values_tactic(m),
         //using_params(mk_ctx_simplify_tactic(m_m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
@@ -160,6 +162,7 @@ static tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p) {
 
 static tactic * mk_qfufbv_preamble(ast_manager & m, params_ref const & p) {
     return and_then(mk_simplify_tactic(m),
+        if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
         mk_propagate_values_tactic(m),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
