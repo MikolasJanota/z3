@@ -30,6 +30,8 @@ Notes:
 #include"sat_tactic.h"
 #include"bv_bound_chk_tactic.h"
 #include"ackermannize_bv_tactic.h"
+#include"bv_bound_chk_tactic.h"
+#include"ackermannize_bv_tactic.h"
 
 #define MEMLIMIT 300
 
