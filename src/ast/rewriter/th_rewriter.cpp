@@ -35,7 +35,6 @@ Notes:
 #include"ast_util.h"
 #include"well_sorted.h"
 
-
 struct th_rewriter_cfg : public default_rewriter_cfg {
     bool_rewriter       m_b_rw;
     arith_rewriter      m_a_rw;
@@ -190,7 +189,6 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 if (st != BR_FAILED)
                     return st;
             }
-
             return m_b_rw.mk_app_core(f, num, args, result);
         }
         if (fid == m_a_rw.get_fid())
