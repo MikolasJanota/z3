@@ -39,16 +39,16 @@ bool bv_bounds::add_constraint(expr* e) {
     if (m_bv_util.is_bv_ule(e, lhs, rhs)) {
         unsigned bv_sz = m_bv_util.get_bv_size(lhs);
         // unsigned inequality with one variable and a constant
-        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) // v <= val
+        if (to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) // v <= val
             return add_bound_unsigned(to_app(lhs), numeral::zero(), val, negated);
-        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) // val <= v
+        if (to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) // val <= v
             return add_bound_unsigned(to_app(rhs), val, numeral::power_of_two(bv_sz) - numeral::one(), negated);
 
         // unsigned inequality with one variable, constant, and addition
         expr *t1, *t2;
         if (m_bv_util.is_bv_add(lhs, t1, t2)
             && m_bv_util.is_numeral(t1, val, bv_sz)
-            && is_uninterp_const(t2)
+            && to_bound(t2)
             && t2 == rhs) {  // val + v <= v
             const numeral mod = numeral::power_of_two(bv_sz);
             return add_bound_unsigned(to_app(rhs), mod - val, mod - numeral::one(), negated);
@@ -78,11 +78,11 @@ bool bv_bounds::add_constraint(expr* e) {
     if (m_bv_util.is_bv_sle(e, lhs, rhs)) {
         unsigned bv_sz = m_bv_util.get_bv_size(lhs);
         // signed inequality with one variable and a constant
-        if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
+        if (to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) { // v <= val
             val = m_bv_util.norm(val, bv_sz, true);
             return add_bound_signed(to_app(lhs), -numeral::power_of_two(bv_sz - 1), val, negated);
         }
-        if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
+        if (to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) { // val <= v
             val = m_bv_util.norm(val, bv_sz, true);
             return add_bound_signed(to_app(rhs), val, numeral::power_of_two(bv_sz - 1) - numeral::one(), negated);
         }

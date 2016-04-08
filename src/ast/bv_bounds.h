@@ -70,10 +70,15 @@ protected:
     inline bool               in_range(app *v, numeral l);
     inline bool               is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val);
     void                      record_singleton(app * v,  numeral& singleton_value);
+    inline bool               to_bound(const expr * e) const;
 };
 
 
 inline bool bv_bounds::is_okay() { return m_okay; }
+
+inline bool bv_bounds::to_bound(const expr * e) const {
+    return is_app(e) && m_bv_util.is_bv(e);
+}
 
 inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
     const unsigned bv_sz = m_bv_util.get_bv_size(v);
@@ -85,18 +90,17 @@ inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
 inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val) {
     SASSERT(e && !v);
     SASSERT(m_bv_util.get_bv_size(e) == bv_sz);
-    if (is_uninterp_const(e)) {
+    expr *lhs(NULL), *rhs(NULL);
+    if (!m_bv_util.is_bv_add(e, lhs, rhs)) {
         v = to_app(e);
         val = rational(0);
         return true;
     }
-    expr *lhs(NULL), *rhs(NULL);
-    if (!m_bv_util.is_bv_add(e, lhs, rhs)) return false;
-    if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) {
+    if (to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) {
         v = to_app(lhs);
         return true;
     }
-    if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) {
+    if (to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) {
         v = to_app(rhs);
         return true;
     }
