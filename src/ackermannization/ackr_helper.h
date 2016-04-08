@@ -24,7 +24,7 @@ class ackr_helper {
         typedef obj_hashtable<app>           app_set;
         typedef obj_map<func_decl, app_set*> fun2terms_map;
 
-        ackr_helper(ast_manager& m) : m_bvutil(m) {}
+        ackr_helper(ast_manager& m, bool only_th) : m_bvutil(m), m_only_th(only_th) {}
 
         /**
         \brief  Determines if a given function should be Ackermannized.
@@ -34,7 +34,7 @@ class ackr_helper {
         */
         inline bool should_ackermannize(app const * a) const {
             if (is_uninterp(a))
-                return true;
+                return !m_only_th;
             else {
                 decl_plugin * p = m_bvutil.get_manager().get_plugin(a->get_family_id());
                 return p->is_considered_uninterpreted(a->get_decl());
@@ -42,6 +42,7 @@ class ackr_helper {
         }
 
         inline bv_util& bvutil() { return m_bvutil; }
+        inline void set_only_th(bool val) { m_only_th = val; }
 
         /**
         \brief Calculates an upper bound for congruence lemmas given a map of function of occurrences.
@@ -58,5 +59,6 @@ class ackr_helper {
         }
     private:
         bv_util                              m_bvutil;
+        bool                                 m_only_th;
 };
 #endif /* ACKR_HELPER_H_6475 */

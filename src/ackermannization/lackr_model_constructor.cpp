@@ -24,7 +24,8 @@
 
 struct lackr_model_constructor::imp {
     public:
-        imp(ast_manager & m,
+        imp(bool only_th,
+            ast_manager & m,
             ackr_info_ref info,
             model_ref & abstr_model,
             conflict_list & conflicts)
@@ -36,7 +37,7 @@ struct lackr_model_constructor::imp {
             , m_bv_rw(m)
             , m_evaluator(NULL)
             , m_empty_model(m)
-            , m_ackr_helper(m)
+            , m_ackr_helper(m, only_th)
         {}
 
         ~imp() {
@@ -373,13 +374,13 @@ lackr_model_constructor::~lackr_model_constructor() {
     if (m_imp) dealloc(m_imp);
 }
 
-bool lackr_model_constructor::check(model_ref& abstr_model) {
+bool lackr_model_constructor::check(bool only_th, model_ref& abstr_model) {
     m_conflicts.reset();
     if (m_imp) {
         dealloc(m_imp);
         m_imp = 0;
     }
-    m_imp = alloc(lackr_model_constructor::imp, m_m, m_info, abstr_model, m_conflicts);
+    m_imp = alloc(lackr_model_constructor::imp, only_th, m_m, m_info, abstr_model, m_conflicts);
     const bool rv = m_imp->check();
     m_state = rv ? CHECKED : CONFLICT;
     return rv;

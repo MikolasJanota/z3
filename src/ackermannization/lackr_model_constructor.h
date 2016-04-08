@@ -29,7 +29,7 @@ class lackr_model_constructor {
         typedef vector<app_pair>                  conflict_list;
         lackr_model_constructor(ast_manager& m, ackr_info_ref info);
         ~lackr_model_constructor();
-        bool check(model_ref& abstr_model);
+        bool check(bool only_th, model_ref& abstr_model);
         const conflict_list& get_conflicts() {
             SASSERT(m_state == CONFLICT);
             return m_conflicts;

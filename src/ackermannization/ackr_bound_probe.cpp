@@ -31,7 +31,7 @@ class ackr_bound_probe : public probe {
         fun2terms_map                m_fun2terms; // a map from functions to occurrences
         ackr_helper                  m_ackr_helper;
 
-        proc(ast_manager & m) : m_m(m), m_ackr_helper(m) { }
+        proc(ast_manager & m) : m_m(m), m_ackr_helper(m, false) { }
 
         ~proc() {
             fun2terms_map::iterator it = m_fun2terms.begin();

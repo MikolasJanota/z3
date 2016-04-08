@@ -3,5 +3,7 @@ def_module_params('ackermannization',
                   export=True,
                   params=(
                           ('eager', BOOL, True, 'eagerly instantiate all congruence rules'),
+                          ("ackermann_limit", UINT, 1000, "a bound for number of congruence Ackermann lemmas for other theories"),
+                          ("only_theory", BOOL, False, "only ackermannize theory uninterpreted")
                           ))
 

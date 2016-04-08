@@ -36,6 +36,8 @@ Notes:
 #include"bound_manager.h"
 #include"probe_arith.h"
 
+#include"ackermannize_tactic.h"
+
 struct quasi_pb_probe : public probe {
     virtual result operator()(goal const & g) {
         bool found_non_01 = false;
@@ -207,7 +209,8 @@ tactic * mk_qflia_tactic(ast_manager & m, params_ref const & p) {
                                              using_params(mk_simplify_tactic(m), pull_ite_p)),
                                     mk_solve_eqs_tactic(m),
                                     mk_elim_uncnstr_tactic(m),
-                                    using_params(mk_simplify_tactic(m), lhs_p) 
+                                    using_params(mk_simplify_tactic(m), lhs_p),
+                                    mk_ackermannize_tactic(m, p)
                                     );
 
     params_ref quasi_pb_p;

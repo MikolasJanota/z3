@@ -28,6 +28,7 @@
 #include"util.h"
 #include"tactic_exception.h"
 #include"goal.h"
+#include"ackermannization_params.hpp"
 
 struct lackr_stats {
     lackr_stats() : m_it(0), m_ackrs_sz(0) {}
@@ -45,7 +46,7 @@ class lackr {
         lackr(ast_manager& m, params_ref p, lackr_stats& st,
             expr_ref_vector& formulas, solver * uffree_solver);
         ~lackr();
-        void updt_params(params_ref const & _p);
+        void updt_params(ackermannization_params const & _p);
 
         /** \brief
          * Solve the formula that the class was initialized with.
@@ -81,7 +82,7 @@ class lackr {
         typedef ackr_helper::fun2terms_map fun2terms_map;
         typedef ackr_helper::app_set       app_set;
         ast_manager&                         m_m;
-        params_ref                           m_p;
+        ackermannization_params              m_p;
         expr_ref_vector                      m_formulas;
         expr_ref_vector                      m_abstr;
         fun2terms_map                        m_fun2terms;
