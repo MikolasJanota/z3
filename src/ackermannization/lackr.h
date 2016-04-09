@@ -43,7 +43,7 @@ struct lackr_stats {
 **/
 class lackr {
     public:
-        lackr(ast_manager& m, params_ref p, lackr_stats& st,
+        lackr(ast_manager& m, params_ref const & p, lackr_stats& st,
             expr_ref_vector& formulas, solver * uffree_solver);
         ~lackr();
         void updt_params(ackermannization_params const & _p);
@@ -82,7 +82,8 @@ class lackr {
         typedef ackr_helper::fun2terms_map fun2terms_map;
         typedef ackr_helper::app_set       app_set;
         ast_manager&                         m_m;
-        ackermannization_params              m_p;
+        params_ref const &                   m_p;
+        ackermannization_params              m_acker_p;
         expr_ref_vector                      m_formulas;
         expr_ref_vector                      m_abstr;
         fun2terms_map                        m_fun2terms;

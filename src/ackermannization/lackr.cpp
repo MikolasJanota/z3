@@ -23,14 +23,15 @@
 #include"for_each_expr.h"
 #include"model_smt2_pp.h"
 
-lackr::lackr(ast_manager& m, params_ref p, lackr_stats& st, expr_ref_vector& formulas,
+lackr::lackr(ast_manager& m, params_ref const & p, lackr_stats& st, expr_ref_vector& formulas,
     solver * uffree_solver)
     : m_m(m)
     , m_p(p)
+    , m_acker_p(p)
     , m_formulas(formulas)
     , m_abstr(m)
     , m_sat(uffree_solver)
-    , m_ackr_helper(m, m_p.only_theory())
+    , m_ackr_helper(m, m_acker_p.only_theory())
     , m_simp(m)
     , m_ackrs(m)
     , m_st(st)
@@ -75,8 +76,8 @@ bool lackr::mk_ackermann(/*out*/goal_ref& g, double lemmas_upper_bound) {
 }
 
 bool lackr::init() {
-    SASSERT(!m_is_init);    
-    params_ref simp_p(m_p.p);
+    SASSERT(!m_is_init);
+    params_ref simp_p(m_p);
     m_simp.updt_params(simp_p);
     m_info = alloc(ackr_info, m_m);
     if (!collect_terms()) return false;
@@ -232,7 +233,7 @@ lbool lackr::lazy() {
         // reconstruct model
         model_ref am;
         m_sat->get_model(am);
-        const bool mc_res = mc.check(m_p.only_theory(), am);
+        const bool mc_res = mc.check(m_acker_p.only_theory(), am);
         if (mc_res) return l_true; // model okay
         // refine abstraction
         const lackr_model_constructor::conflict_list conflicts = mc.get_conflicts();
