@@ -257,6 +257,8 @@ bool bv_bounds::is_sat(app * v) {
         }
     }
 
+    if (lower < upper) is_singleton = false;
+
     if (!is_sat && (lower == upper)) {
         is_singleton = true;
         is_sat = true;
