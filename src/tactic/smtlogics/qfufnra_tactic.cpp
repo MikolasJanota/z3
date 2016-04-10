@@ -28,6 +28,7 @@ Notes:
 #include"simplify_tactic.h"
 #include"nnf_tactic.h"
 #include"tseitin_cnf_tactic.h"
+#include"ackermannize_tactic.h"
 
 tactic * mk_qfufnra_tactic(ast_manager & m, params_ref const& p) {
     params_ref main_p = p;
@@ -35,6 +36,7 @@ tactic * mk_qfufnra_tactic(ast_manager & m, params_ref const& p) {
     main_p.set_bool("blast_distinct", true);
     
     return and_then(and_then(using_params(mk_simplify_tactic(m, p), main_p),
+                             mk_ackermannize_tactic(m, p),
                              mk_purify_arith_tactic(m, p),
                              mk_propagate_values_tactic(m, p),
                              mk_solve_eqs_tactic(m, p),

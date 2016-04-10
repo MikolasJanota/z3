@@ -31,9 +31,11 @@ Notes:
 #include"qfaufbv_tactic.h"
 #include"qfauflia_tactic.h"
 #include"qfufnra_tactic.h"
+#include"ackermannize_tactic.h"
 
 tactic * mk_default_tactic(ast_manager & m, params_ref const & p) {
     tactic * st = using_params(and_then(mk_simplify_tactic(m),
+                                        mk_ackermannize_tactic(m, p),
                                         cond(mk_is_qfbv_probe(),  mk_qfbv_tactic(m),
                                         cond(mk_is_qfaufbv_probe(), mk_qfaufbv_tactic(m),                                        
                                         cond(mk_is_qflia_probe(), mk_qflia_tactic(m),

@@ -23,6 +23,7 @@ Notes:
 #include"solve_eqs_tactic.h"
 #include"propagate_values_tactic.h"
 #include"smt_tactic.h"
+#include"ackermannize_tactic.h"
 
 tactic * mk_qfuf_tactic(ast_manager & m, params_ref const & p) {
     params_ref s2_p;
@@ -34,6 +35,7 @@ tactic * mk_qfuf_tactic(ast_manager & m, params_ref const & p) {
                     mk_solve_eqs_tactic(m, p),
                     using_params(mk_simplify_tactic(m, p), s2_p),
                     mk_symmetry_reduce_tactic(m, p),
+                    mk_ackermannize_tactic(m, p),
                     mk_smt_tactic(p));
 }
 

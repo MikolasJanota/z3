@@ -28,6 +28,7 @@ Notes:
 #include"nla2bv_tactic.h"
 #include"ctx_simplify_tactic.h"
 #include"cofactor_term_ite_tactic.h"
+#include"ackermannize_tactic.h"
 
 tactic * mk_qfnia_bv_solver(ast_manager & m, params_ref const & p_ref) {
     params_ref p = p_ref;
@@ -74,7 +75,9 @@ tactic * mk_qfnia_premable(ast_manager & m, params_ref const & p_ref) {
                  using_params(mk_simplify_tactic(m), pull_ite_p),
                  mk_elim_uncnstr_tactic(m),
                  skip_if_failed(using_params(mk_cofactor_term_ite_tactic(m), elim_p)),
-                 using_params(mk_simplify_tactic(m), simp_p));    
+                 using_params(mk_simplify_tactic(m), simp_p),
+                 mk_ackermannize_tactic(m, p_ref)
+                 );    
 }
 
 tactic * mk_qfnia_sat_solver(ast_manager & m, params_ref const & p) {
