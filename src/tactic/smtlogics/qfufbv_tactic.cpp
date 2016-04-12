@@ -93,6 +93,7 @@ public:
         ackermannization_params p(m_p);
         if (!p.eager()) st.update("lackr-its", m_st.m_it);
         st.update("ackr-constraints", m_st.m_ackrs_sz);
+		st.update("potential-ackr-constraints", m_st.m_packrs_sz);
     }
 
     virtual void reset_statistics() { m_st.reset(); }

@@ -92,6 +92,7 @@ bool lackr::init() {
 bool lackr::ackr(app * const t1, app * const t2) {
     TRACE("lackr", tout << "ackr "
             << mk_ismt2_pp(t1, m_m, 2) << " , " << mk_ismt2_pp(t2, m_m, 2) << "\n";);
+	m_st.m_packrs_sz++;
     const unsigned sz = t1->get_num_args();
     SASSERT(t2->get_num_args() == sz);
     expr_ref_vector eqs(m_m);

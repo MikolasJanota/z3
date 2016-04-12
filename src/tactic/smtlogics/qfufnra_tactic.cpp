@@ -35,9 +35,9 @@ tactic * mk_qfufnra_tactic(ast_manager & m, params_ref const& p) {
     main_p.set_bool("elim_and", true);
     main_p.set_bool("blast_distinct", true);
     
-    return and_then(and_then(using_params(mk_simplify_tactic(m, p), main_p),
-                             mk_ackermannize_tactic(m, p),
+    return and_then(and_then(using_params(mk_simplify_tactic(m, p), main_p),                             
                              mk_purify_arith_tactic(m, p),
+		                     mk_ackermannize_tactic(m, p),
                              mk_propagate_values_tactic(m, p),
                              mk_solve_eqs_tactic(m, p),
                              mk_elim_uncnstr_tactic(m, p)),
