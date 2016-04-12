@@ -24,6 +24,7 @@ class miner {
         void operator() (expr_ref f);
         void init(expr_ref f);
         bool test_term(app * term, expr_ref& value);
+        bool test_term(expr * term);
     private:
         struct            imp;
         imp*              m_imp;

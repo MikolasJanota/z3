@@ -41,6 +41,9 @@ Notes:
 #include"qfbv_tactic.h"
 #include"tactic2solver.h"
 ///////////////
+#include"prepro_mine_tactic.h"
+
+static tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p);
 
 class qfufbv_ackr_tactic : public tactic {
 public:
@@ -122,7 +125,12 @@ private:
             }
         }
         else {
-            tactic_ref t = mk_qfaufbv_tactic(m_m, m_p);
+            //tactic_ref t = mk_qfaufbv_tactic(m_m, m_p);
+            //tactic_ref _t = and_then(mr.get(), t.get());
+            //sat = mk_tactic2solver(m_m, _t.get(), m_p);
+            tactic_ref mr = mk_prepro_mine_tactic(m_m, m_p);
+            tactic_ref prea = mk_qfufbv_preamble1(m_m, m_p);
+            tactic_ref t = and_then(prea.get(), mr.get());
             sat = mk_tactic2solver(m_m, t.get(), m_p);
         }
         SASSERT(sat != NULL);
@@ -153,7 +161,7 @@ static tactic * mk_qfufbv_preamble1(ast_manager & m, params_ref const & p) {
         //using_params(mk_ctx_simplify_tactic(m_m), ctx_simp_p),
         mk_solve_eqs_tactic(m),
         mk_elim_uncnstr_tactic(m),
-        if_no_proofs(if_no_unsat_cores(mk_bv_ternary_tactic(m))),
+        //if_no_proofs(if_no_unsat_cores(mk_bv_ternary_tactic(m))),
         if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
         mk_max_bv_sharing_tactic(m),
         using_params(mk_simplify_tactic(m), simp2_p)

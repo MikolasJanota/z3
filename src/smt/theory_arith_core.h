@@ -721,6 +721,11 @@ namespace smt {
             return internalize_div(n);
         else if (m_util.is_idiv(n))
             return internalize_idiv(n);
+        else if (is_app_of(n, get_id(), OP_IDIV_0) || is_app_of(n, get_id(), OP_DIV_0)) {
+            ctx.internalize(n->get_arg(0), false);
+            enode * e = mk_enode(n);
+            return mk_var(e);
+        }
         else if (m_util.is_mod(n)) 
             return internalize_mod(n);
         else if (m_util.is_rem(n)) 
@@ -3207,7 +3212,8 @@ namespace smt {
     template<typename Ext>
     bool theory_arith<Ext>::get_value(enode * n, expr_ref & r) {
         theory_var v = n->get_th_var(get_id());
-        return v != null_theory_var && to_expr(get_value(v), is_int(v), r);
+        inf_numeral val;
+        return v != null_theory_var && (val = get_value(v), (!is_int(v) || val.is_int())) && to_expr(val, is_int(v), r);
     }
 
     template<typename Ext>

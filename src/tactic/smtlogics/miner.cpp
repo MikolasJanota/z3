@@ -184,7 +184,7 @@ struct miner::imp {
         assignment_maker am(m_m);
         const unsigned size = m_collector->get_num_decls();
         func_decl * const * const declarations = m_collector->get_func_decls();
-        for (unsigned i = 0; i < 5; ++i) {
+        for (unsigned i = 0; i < 10; ++i) {
             assignment_maker::gen_mode m =
                 i == 0 ? assignment_maker::ZERO
                 : (i == 1 ? assignment_maker::ONE
@@ -322,7 +322,8 @@ struct miner::imp {
                                                a->get_num_args(), a->get_args())) {
                             visited.mark(a, true);
                             stack.pop_back();
-                            mine_term_bf(a);
+                            //mine_term_bf(a);
+                            mine_term(a);
                         }
                     }
                     break;
@@ -427,18 +428,19 @@ void miner::imp::mine_term_bf(app * term) {
     if (is_val(term)) return;
     if (term->get_num_args() == 0) return;
     if (!m_bv_util.is_bv(term)) return;// for now only check bit vectors
-
-    expr_ref_vector term_values(m_m);
-    make_values(term, term_values);
+    const unsigned term_size = get_num_nodes(term);
+    if (term_size <= 3) return;
 
     expr_collector  collector(m_m, term->get_decl()->get_range(), term);
     collector.set_exact(true);
     collector.visit();
+    const unsigned bv_sz = m_bv_util.get_bv_size(term);
     expr_ref_vector exprs = collector.collected();
     unsigned i = 0;
     while (i < exprs.size()) {
         expr * e = exprs.get(i);
-        const bool del = !is_app(e) || to_app(e)->get_num_args();
+        const unsigned e_sz = m_bv_util.get_bv_size(e);
+        const bool del = !is_app(e) || to_app(e)->get_num_args() || e_sz != bv_sz;
         if (del) {
             exprs[i] = exprs.back();
             exprs.pop_back();
@@ -447,21 +449,24 @@ void miner::imp::mine_term_bf(app * term) {
             ++i;
         }
     }
+    if (exprs.empty()) return;
 
+    expr_ref_vector term_values(m_m);
+    make_values(term, term_values);
 
-	const unsigned bv_sz = m_bv_util.get_bv_size(term);
+	
     bool done = false;
     const unsigned B = 20;
     expr_ref tested_expression(m_m);
-    const unsigned term_size = get_num_nodes(term);
     unsigned min_size = term_size;
     TRACE("miner", tout << "mining: " << mk_ismt2_pp(term, m_m, 2) << "(" << term_size << ")" << std::endl;);
     std::cout << "mining: " << mk_ismt2_pp(term, m_m, 2) << "(" << term_size << ")" << std::endl;
     th_rewriter tr(m_m);
     expr_gen* eg = mk_expr_gen(m_m, 3, bv_sz, exprs);
-    while (!done) {
+    unsigned itc = 0;
+    while (!done) {        
         const bool s = eg->gen(tested_expression);
-        unsigned budget = min_size;
+        unsigned budget = min_size / 2;
         done = (eg->inc(budget));
         if(done) break;
 
@@ -479,6 +484,7 @@ void miner::imp::mine_term_bf(app * term) {
                     << mk_ismt2_pp(tested_expression, m_m, 2)
                     << std::endl;
         }
+        if (itc++ > 10000) done = true;
     }
     dealloc(eg);
 }
@@ -501,6 +507,7 @@ void miner::imp::mine_term(app * term) {
     }
     if (!m_bv_util.is_bv(term)) return;// for now only check bit vectors
     expr_collector  collector(m_m, term->get_decl()->get_range(), term);
+    collector.set_exact(true);
     collector.visit();
     expr_ref_vector& exprs = collector.collected();
     const unsigned e_num = exprs.size();
@@ -558,5 +565,14 @@ void miner::init(expr_ref f) { m_imp->init(f); }
 bool miner::test_term(app * term, expr_ref& value) {
     return m_imp->test_term(term, value);
 }
+
+bool miner::test_term(expr * term) {
+    if (!is_app(term)) return false;
+    ast_manager m(m_imp->m_m);
+    expr_ref value(m);
+    m_imp->m_print = true;
+    return test_term(to_app(term), value);
+}
+
 
 miner::~miner() { if (m_imp) dealloc(m_imp); }

@@ -68,7 +68,7 @@ class expr_gen_imp : public expr_gen {
                     expr_ref s0(m_m), s1(m_m);
                     m_subs[0]->gen(s0);
                     m_subs[1]->gen(s1);
-                    if (m_state < 3) done = s0->get_id() <= s1->get_id();
+                    if (m_state <= 3) done = s0->get_id() < s1->get_id();
                     else done = !m_m.are_equal(s0.get(), s1.get());
                     //if (!done)  std::cout << "skip " << mk_pp(s0.get(), m_m) << ":" << mk_pp(s1.get(), m_m) << std::endl;
                 } else {
@@ -106,6 +106,8 @@ class expr_gen_imp : public expr_gen {
                 case 1:
                 case 2:
                 case 3:
+                case 4:
+                case 5:
                     {
                         SASSERT(m_subs.size() == 2);
                         SASSERT(m_depth);
@@ -113,7 +115,7 @@ class expr_gen_imp : public expr_gen {
                         const bool carry = inc_subs(tmp_budget);
                         if (carry) {
                             m_state++;
-                            if (m_state == 4) {
+                            if (m_state == 6) {
                                 retv = true;
                                 m_state = 0;
                             }
@@ -160,8 +162,10 @@ class expr_gen_imp : public expr_gen {
             switch(m_state) {
                 case 0: out = m_leafs.get(m_leaf_pos); break;
                 case 1: out = m_bv_util.mk_bv_add(es.get(0), es.get(1)); break;
-                case 2: out = m_bv_util.mk_bv_mul(es.get(0), es.get(1)); break;
-                case 3: out = m_bv_util.mk_bv_urem(es.get(0), es.get(1)); break;
+                case 2: out = m_bv_util.mk_bv_or(2, es.c_ptr()); break;
+                case 3: out = m_bv_util.mk_bv_mul(es.get(0), es.get(1)); break;
+                case 4: out = m_bv_util.mk_bv_shl(es.get(0), es.get(1)); break;
+                case 5: out = m_bv_util.mk_bv_urem(es.get(0), es.get(1)); break;
                 default:
                         UNREACHABLE();
                         out = NULL;
