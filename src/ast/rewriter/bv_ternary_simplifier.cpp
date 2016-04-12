@@ -252,7 +252,8 @@ tvec_ref tvec_maker::mk_num(app * n) {
     return mk_num(val, sz);
 }
 
-tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {    
+tvec_ref tvec_maker::mk_num(rational val, unsigned sz) {
+    TRACE("bv_ternary", tout << "mk_num: " << val << ":" << sz << std::endl;);
     const rational two(2);
     unsigned i = sz;
     while (i--) {
@@ -383,12 +384,13 @@ tvec_ref tvec_maker::mk_udiv(const tvec_ref&  v1, const tvec_ref&  v2) {
     if (!h2) return mk_undef(sz); // TODO Different handling, div0?
     if (!nz1) return mk_num(rational::zero(), sz);
     if (h2 && (nzp1 < hp2)) return mk_num(rational::zero(), sz);
-    const bool out_has1 = h1 && (hp1 > nzp2);
-    const unsigned pos1 = out_has1 ? hp1 - nzp2 : -1;
+    const bool has1 = h1 && (hp1 >= nzp2);
     for (unsigned i = 0; i < sz; ++i) {
-        if (out_has1 && (i == pos1)) push_tmp(l_true);
-        else if (h2 && i > (nzp1 - hp2)) push_tmp(l_false);
-        else push_tmp(l_undef);
+        lbool b;
+        if (has1 && i == (hp1 - nzp2)) b = l_true;
+        else if (h2 && i > (nzp1 - hp2)) b = l_false;
+        else b = l_undef;
+        push_tmp(b);
     }
     const tvec_ref rv = mk(sz);
     TRACE("bv_ternary", tout << "mk_udiv: " << v1 << ":" << v2 << "=" << rv << std::endl;);

@@ -191,15 +191,6 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 if (st != BR_FAILED)
                     return st;
             }
-            if (k == OP_AND && num < 10) {
-                bv_bounds bvb(m());
-                for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
-                if (!bvb.is_sat()) {
-                    result = m().mk_false();
-                    return BR_REWRITE2;
-                }
-            }
-
             if (k == OP_ITE) {
                 SASSERT(num == 3);
                 family_id s_fid = m().get_sort(args[1])->get_family_id();

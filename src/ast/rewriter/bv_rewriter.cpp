@@ -33,12 +33,13 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_split_concat_eq = p.split_concat_eq();
     m_udiv2mul = p.udiv2mul();
     m_bvnot2arith = p.bvnot2arith();
-    m_bvnot_simpl = p.bvnot_simpl();
+    m_bvnot_simpl = p.bv_not_simpl();
     m_bv_sort_ac = p.bv_sort_ac();
     m_mkbv2num = _p.get_bool("mkbv2num", false);
     m_concat_fusion = p.bv_concat_fusion();
     m_extract_prop = p.bv_extract_prop();
     m_ite2id = p.bv_ite2id();
+    m_le_extra = p.bv_le_extra();
 }
 
 void bv_rewriter::updt_params(params_ref const & p) {
@@ -232,6 +233,102 @@ br_status bv_rewriter::mk_slt(expr * a, expr * b, expr_ref & result) {
     return BR_REWRITE2;
 }
 
+expr * bv_rewriter::concat(unsigned num_args, expr * const * args) {
+    SASSERT(num_args);
+    switch (num_args) {
+        case 0: return m_util.mk_concat(num_args, args);
+        case 1: return args[0];
+        default: return m_util.mk_concat(num_args, args);
+    }
+}
+
+br_status bv_rewriter::rw_leq_concats(bool is_signed, expr * _a, expr * _b, expr_ref & result) {
+    if (!m_util.is_concat(_a) || !m_util.is_concat(_b))
+        return BR_FAILED;
+    const app * const a = to_app(_a);
+    const app * const b = to_app(_b);
+    const unsigned numa = a->get_num_args();
+    const unsigned numb = b->get_num_args();
+    const unsigned num_min = std::min(numa, numb);
+
+    if (numa && numb) { // first arg numeral
+        numeral af, bf;
+        unsigned af_sz, bf_sz;
+        if (   is_numeral(a->get_arg(0), af, af_sz)
+            && is_numeral(b->get_arg(0), bf, bf_sz) ) {
+            const unsigned sz_min = std::min(af_sz, bf_sz);
+            const numeral hi_af = m_util.norm(af_sz > sz_min ? div(af, rational::power_of_two(af_sz - sz_min)) : af,
+                                              sz_min, is_signed);
+            const numeral hi_bf = m_util.norm(bf_sz > sz_min ? div(bf, rational::power_of_two(bf_sz - sz_min)) : bf,
+                                              sz_min, is_signed);
+            if (hi_af != hi_bf) {
+                result = hi_af < hi_bf ? m().mk_true() : m().mk_false();
+                return BR_DONE;
+            }
+            expr_ref new_a(m());
+            expr_ref new_b(m());
+            if (af_sz > sz_min) {
+                ptr_buffer<expr> new_args;
+                new_args.push_back(mk_numeral(af, af_sz - sz_min));
+                for (unsigned i = 1; i < numa; ++i) new_args.push_back(a->get_arg(i));
+                new_a = concat(new_args.size(), new_args.c_ptr());
+            } else {
+                new_a = concat(numa - 1, a->get_args() + 1);
+            }
+            if (bf_sz > sz_min) {
+                ptr_buffer<expr> new_args;
+                new_args.push_back(mk_numeral(bf, bf_sz - sz_min));
+                for (unsigned i = 1; i < numb; ++i) new_args.push_back(b->get_arg(i));
+                new_b = concat(new_args.size(), new_args.c_ptr());
+            } else {
+                new_b = concat(numb - 1, b->get_args() + 1);
+            }
+            result = m_util.mk_ule(new_a, new_b);
+            return BR_REWRITE2;
+        }
+    }
+
+    { // common prefix
+        unsigned common = 0;
+        while (common < num_min && m().are_equal(a->get_arg(common), b->get_arg(common))) ++common;
+        SASSERT((common == numa) == (common == numb));
+        if (common == numa) {
+            SASSERT(0); // shouldn't get here as both sides are equal
+            result = m().mk_true();
+            return BR_DONE;
+        }
+        if (common > 0) {
+            result = m_util.mk_ule(concat(numa - common, a->get_args() + common),
+                                   concat(numb - common, b->get_args() + common));
+            return BR_REWRITE2;
+        }
+    }
+
+    { // common postfix
+        unsigned new_numa = a->get_num_args();
+        unsigned new_numb = b->get_num_args();
+        while (new_numa && new_numb) {
+            expr * const last_a = a->get_arg(new_numa - 1);
+            expr * const last_b = b->get_arg(new_numb - 1);
+            if (!m().are_equal(last_a, last_b)) break;
+            new_numa--;
+            new_numb--;
+        }
+        if (new_numa == 0) {
+            SASSERT(0); // shouldn't get here as both sides are equal
+            result = m().mk_true();
+            return BR_DONE;
+        }
+        if (new_numa != numa) {
+            result = is_signed ? m_util.mk_sle(concat(new_numa, a->get_args()), concat(new_numb, b->get_args()))
+                               : m_util.mk_ule(concat(new_numa, a->get_args()), concat(new_numb, b->get_args()));
+            return BR_REWRITE2;
+        }
+    }
+
+    return BR_FAILED;
+}
+
 br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref & result) {
 
     numeral r1, r2, r3;
@@ -305,6 +402,15 @@ br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref 
         (r2 % r1).is_zero() && r1 + r2 - rational::one() < rational::power_of_two(sz-1)) {
         result = m_util.mk_sle(a1, m_util.mk_numeral(r1 + r2 - rational::one(), sz));
         return BR_REWRITE2;
+    }
+
+    if (m_le_extra) {
+        const br_status cst = rw_leq_concats(is_signed, a, b, result);
+        if (cst != BR_FAILED) {
+            TRACE("le_extra", tout << (is_signed ? "bv_sle\n" : "bv_ule\n")
+                      << mk_ismt2_pp(a, m(), 2) <<  "\n" << mk_ismt2_pp(b, m(), 2) <<  "\n--->\n"<< mk_ismt2_pp(result, m(), 2) << "\n";);
+            return cst;
+        }
     }
 
 #if 0
@@ -440,6 +546,7 @@ unsigned bv_rewriter::propagate_extract(unsigned high, expr * arg, expr_ref & re
         if (new_arg) new_args.push_back(new_arg);
     }
     result = m().mk_app(get_fid(), a->get_decl()->get_decl_kind(), new_args.size(), new_args.c_ptr());
+    SASSERT(m_util.is_bv(result));
     return removable;
 }
 
@@ -551,6 +658,8 @@ br_status bv_rewriter::mk_extract(unsigned high, unsigned low, expr * arg, expr_
         const unsigned ep_rm = propagate_extract(high, arg, ep_res);
         if (ep_rm != 0) {
             result = m_mk_extract(high, low, ep_res);
+            TRACE("extract_prop", tout << mk_ismt2_pp(arg, m()) << "\n[" << high <<"," << low << "]\n" << ep_rm << "---->\n"
+                                       << mk_ismt2_pp(result.get(), m()) << "\n";);
             return BR_REWRITE2;
         }
     }
@@ -1150,7 +1259,7 @@ br_status bv_rewriter::mk_bv2int(expr * arg, expr_ref & result) {
 
 br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_ref & result) {
     if (num_args < 2) return BR_FAILED;
-    unsigned i;
+    unsigned fused_index;
     unsigned hi_a, lo_a;
     unsigned hi_bs, lo_bs;
     expr * a = NULL;
@@ -1159,10 +1268,9 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
     expr * bs_arg = NULL;
     bool found = false;
     const unsigned fused_low = 0;
-    for (i = 0; i < (num_args - 1) && !found; i++) {
-        a = args[i];
-        b = args[i + 1];
-        TRACE("concat_fusion", tout << mk_ismt2_pp(a, m()) << "\n" << mk_ismt2_pp(b, m()) << "\n";);
+    for (fused_index = 0; fused_index < (num_args - 1); fused_index++) {
+        a = args[fused_index];
+        b = args[fused_index + 1];
         // match for a = (OP as1 .. asn)[hi_a:lo_a]  b = (OP bs1 .. bsn), OP in {add, mul}
         if (!m_util.is_bv_add(b) && !m_util.is_bv_mul(b)) continue;
         if (!m_util.is_extract(a, lo_a, hi_a, a_arg)) continue;
@@ -1172,6 +1280,7 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
         if (to_app(a_arg)->get_num_args() != to_app(b)->get_num_args()) continue;
         // check that each bs_i = as_i[lo_a-1:L]
         // where L is 0 for mul and add, otherwise it is some constant
+        TRACE("concat_fusion", tout << "attempting: " << mk_ismt2_pp(a, m()) << "\n" << mk_ismt2_pp(b, m()) << "\n";);
         const unsigned sub_num = to_app(a_arg)->get_num_args();
         bool all_fuse = true;
         for (unsigned j = 0; j < sub_num && all_fuse; j++) {
@@ -1179,22 +1288,26 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
             expr * const bs = to_app(b)->get_arg(j);
             all_fuse &= m_util.is_extract(bs, lo_bs, hi_bs, bs_arg);
             all_fuse &= fused_low == lo_bs && ((1+hi_bs) == lo_a) && bs_arg == as;
-            TRACE("concat_fusion", tout << mk_ismt2_pp(as, m()) << "\n" << mk_ismt2_pp(bs_arg, m()) << "\n";);
+            TRACE("concat_fusion", tout << "compare: " << mk_ismt2_pp(as, m()) << "\n" << mk_ismt2_pp(bs_arg, m()) << "\n";);
         }
-        if (all_fuse) found = true;
+        if (all_fuse) {
+            found = true;
+            break;
+        }
     }
     if (!found) return BR_FAILED;
     const bool vacuous_extraction = (hi_a == (get_bv_size(a_arg) - 1)) && (fused_low == 0);
     expr * const fused = vacuous_extraction ? a_arg : m_mk_extract(hi_a, fused_low, a_arg);
+    TRACE("concat_fusion", tout << "fused: " << mk_ismt2_pp(fused, m()) << "\n";);
     switch (num_args) {
         case 0:
         case 1: UNREACHABLE();
         case 2: result = fused; break;
         default: {
            expr_ref_buffer new_args(m());
-           for (unsigned j = 0; j < i; ++j) new_args.push_back(args[j]);
+           for (unsigned j = 0; j < fused_index; ++j) new_args.push_back(args[j]);
            new_args.push_back(fused);
-           for (unsigned j = i + 2; j < num_args; ++j) new_args.push_back(args[j]);
+           for (unsigned j = fused_index + 2; j < num_args; ++j) new_args.push_back(args[j]);
            result = m_util.mk_concat(new_args.size(), new_args.c_ptr());
         }
     }
@@ -1204,6 +1317,10 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
 br_status bv_rewriter::mk_concat(unsigned num_args, expr * const * args, expr_ref & result) {
     if (m_concat_fusion) {
         const br_status fc_st = fuse_concat(num_args, args, result);
+        CTRACE("concat_fusion", fc_st != BR_FAILED,
+                   for (unsigned i = 0; i < num_args; ++i) tout << "++" << mk_ismt2_pp(args[i], m()) << "\n";
+                   tout << "---->\n" << mk_ismt2_pp(result.get(), m()) << "\n";
+                   );
         if (fc_st != BR_FAILED) return fc_st;
     }
     expr_ref_buffer new_args(m());

@@ -22,21 +22,47 @@
 #include"ast.h"
 #include"bv_decl_plugin.h"
 
+<<<<<<< HEAD
 /* 
  * All bounds/intervals are closed. Methods that add new constraints 
  * return false if inconsistency has already been reached.  
  * Typical usage is to call add_constraint(e) repeatedly and call is_sat() in the end.  
+=======
+/* \brief A class to analyze constraints on bit vectors.
+
+  The objective is to identify inconsistencies in polynomial time.
+  All bounds/intervals are closed. Methods that add new constraints
+  return false if inconsistency has already been reached.
+  Typical usage is to call repeatedly add_constraint(e) and call is_sat() in the end.  
+>>>>>>> preprocessing
  */
 class bv_bounds {
 public:
     typedef rational numeral;
     typedef std::pair<numeral, numeral> interval;
+<<<<<<< HEAD
     bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {};
 public: // bounds addition methods
+=======
+    typedef obj_map<app, numeral>       bound_map;
+    bv_bounds(ast_manager& m) : m_m(m), m_bv_util(m), m_okay(true) {};
+    ~bv_bounds();
+public: // bounds addition methods
+    /** \brief Add a constraint to the system.
+
+       The added constraints are to be considered by is_sat.
+       Currently, only special types of inequalities are supported, e.g. v <= v+1.
+       Other constraints are ignored.
+       Returns false if the system became trivially unsatisfiable
+    **/
+    bool add_constraint(expr* e);
+
+>>>>>>> preprocessing
     bool bound_up(app * v, numeral u); // v <= u
     bool bound_lo(app * v, numeral l); // l <= v
     inline bool add_neg_bound(app * v, numeral a, numeral b); // not (a<=v<=b)
     bool add_bound_signed(app * v, numeral a, numeral b, bool negate);
+<<<<<<< HEAD
     bool add_bound_unsigned(app * v,  numeral a, numeral b, bool negate);
     bool add_constraint(expr* e); // identify special types of expressions to determine bounds
 public:
@@ -46,20 +72,47 @@ protected:
     typedef vector<interval>            intervals;
     typedef obj_map<app, intervals*>    intervals_map; 
     typedef obj_map<app, numeral>       bound_map;
+=======
+    bool add_bound_unsigned(app * v, numeral a, numeral b, bool negate);
+public:
+    bool is_sat();  ///< Determine if the set of considered constraints is satisfiable.
+    bool is_okay();
+    const bound_map& singletons() { return m_singletons; }
+    bv_util& bvu() { return m_bv_util;  }
+protected:
+    typedef vector<interval>            intervals;
+    typedef obj_map<app, intervals*>    intervals_map;
+>>>>>>> preprocessing
     ast_manager&              m_m;
     bound_map                 m_unsigned_lowers;
     bound_map                 m_unsigned_uppers;
     intervals_map             m_negative_intervals;
+<<<<<<< HEAD
+=======
+    bound_map                 m_singletons;
+>>>>>>> preprocessing
     bv_util                   m_bv_util;
     bool                      m_okay;
     bool                      is_sat(app * v);
     inline bool               in_range(app *v, numeral l);
     inline bool               is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val);
+<<<<<<< HEAD
+=======
+    void                      record_singleton(app * v,  numeral& singleton_value);
+    inline bool               to_bound(const expr * e) const;
+>>>>>>> preprocessing
 };
 
 
 inline bool bv_bounds::is_okay() { return m_okay; }
 
+<<<<<<< HEAD
+=======
+inline bool bv_bounds::to_bound(const expr * e) const {
+    return is_app(e) && m_bv_util.is_bv(e);
+}
+
+>>>>>>> preprocessing
 inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
     const unsigned bv_sz = m_bv_util.get_bv_size(v);
     const bv_bounds::numeral zero(0);
@@ -70,11 +123,17 @@ inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
 inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val) {
     SASSERT(e && !v);
     SASSERT(m_bv_util.get_bv_size(e) == bv_sz);
+<<<<<<< HEAD
     if (is_uninterp_const(e)) {
+=======
+    expr *lhs(NULL), *rhs(NULL);
+    if (!m_bv_util.is_bv_add(e, lhs, rhs)) {
+>>>>>>> preprocessing
         v = to_app(e);
         val = rational(0);
         return true;
     }
+<<<<<<< HEAD
     expr *lhs(NULL), *rhs(NULL);
     if (!m_bv_util.is_bv_add(e, lhs, rhs)) return false;
     if (is_uninterp_const(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) {
@@ -82,6 +141,13 @@ inline bool bv_bounds::is_constant_add(unsigned bv_sz, expr * e, app*& v, numera
         return true;
     }
     if (is_uninterp_const(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) {
+=======
+    if (to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz)) {
+        v = to_app(lhs);
+        return true;
+    }
+    if (to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz)) {
+>>>>>>> preprocessing
         v = to_app(rhs);
         return true;
     }

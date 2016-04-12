@@ -13,6 +13,8 @@ def_module_params(module_name='rewriter',
                           ("bv_trailing", BOOL, False, "lean removal of trailing zeros"),
                           ("bv_concat_fusion", BOOL, False, "attempt fusion of concat for some non-trivial cases"),
                           ("bv_extract_prop", BOOL, False, "attempt to partially propagate extraction inwards"),
-                          ("bvnot_simpl", BOOL, False, "apply simplifications for bvnot"),
-                          ("bv_ite2id", BOOL, False, "rewrite ite that can be simplified to identity")
+                          ("bv_not_simpl", BOOL, False, "apply simplifications for bvnot"),
+                          ("bv_use_ternary", BOOL, False, "enable the ternary tactic"),
+                          ("bv_ite2id", BOOL, False, "rewrite ite that can be simplified to identity"),
+                          ("bv_le_extra", BOOL, False, "additional bu_(u/s)le simplifications")
                           ))

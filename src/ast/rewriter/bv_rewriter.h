@@ -65,6 +65,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_concat_fusion;
     bool       m_extract_prop;
     bool       m_bvnot_simpl;
+    bool       m_le_extra;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -74,6 +75,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_sle(expr * a, expr * b, expr_ref & result);
     br_status mk_sge(expr * a, expr * b, expr_ref & result);
     br_status mk_slt(expr * a, expr * b, expr_ref & result);
+    br_status rw_leq_concats(bool is_signed, expr * a, expr * b, expr_ref & result);
     br_status mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref & result);
 
     br_status fuse_concat(unsigned num_args, expr * const * args, expr_ref & result);
@@ -142,6 +144,8 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool is_concat_target(expr* lhs, expr* rhs) const;
 
     void updt_local_params(params_ref const & p);
+
+    expr * concat(unsigned num_args, expr * const * args);
 
 public:
     bv_rewriter(ast_manager & m, params_ref const & p = params_ref()):
