@@ -444,7 +444,6 @@ tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
     const bool h2 = find_hi_bit(v2, hp2);
     if (!h2) return mk_undef(sz); // TODO div 0 Different handling?
     if (!nz1) return mk_num(rational::zero(), sz); // 0 / rhs
-    tvec_ref rv;
     if (nzp1 < hp2) {// rhs bigger than lhs, urem has no effect
          return v1;
     } else {
@@ -453,7 +452,7 @@ tvec_ref tvec_maker::mk_urem(tvec_ref&  v1, tvec_ref&  v2) {
          for (unsigned i = nzp2+1; i < sz; ++i) push_tmp(l_false);
          return mk(sz);
     }
-    return rv;
+	UNREACHABLE();
 }
 
 

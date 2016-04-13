@@ -50,6 +50,7 @@ bool bv_bounds::add_constraint(expr* e) {
             && m_bv_util.is_numeral(t1, val, bv_sz)
             && to_bound(t2)
             && t2 == rhs) {  // val + v <= v
+            if (!val.is_pos()) return m_okay;
             const numeral mod = numeral::power_of_two(bv_sz);
             return add_bound_unsigned(to_app(rhs), mod - val, mod - numeral::one(), negated);
         }
