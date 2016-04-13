@@ -17,9 +17,10 @@
 #ifndef MINER_H_17438
 #define MINER_H_17438
 #include"ast.h"
+#include"params.h"
 class miner {
     public:
-        miner(ast_manager& m);
+        miner(ast_manager& m, params_ref const & p);
         virtual ~miner();
         void operator() (expr_ref f);
         void init(expr_ref f);

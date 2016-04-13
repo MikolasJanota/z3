@@ -52,7 +52,7 @@ struct rewriter_cfg : public default_rewriter_cfg {
         , m_dt_rw(m)
         , m_pb_rw(m)
         , m_f_rw(m)
-        , m_miner(m)
+        , m_miner(m, p)
     {
         m_b_rw.set_flat(false);
         m_a_rw.set_flat(false);

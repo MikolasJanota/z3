@@ -96,18 +96,21 @@ public:
 
 struct miner::imp {
     ast_manager&                   m_m;
+	params_ref                     m_p;
     vector<model_ref>              m_assignments;
     ptr_vector<model_evaluator>    m_evaluators;
     decl_collector*                m_collector;
     bool                           m_print;
     bv_util                        m_bv_util;
 
-    imp(ast_manager & m)
+    imp(ast_manager & m, params_ref const & p)
         : m_m(m)
+		, m_p(p)
         , m_collector(NULL)
         , m_print(false)
         , m_bv_util(m)
         , tmp_mdl(m)
+
     {}
 
     ~imp() { cleanup(); }
@@ -344,11 +347,9 @@ struct miner::imp {
 
     lbool is_tautology(expr_ref e) {
         expr_ref n(m_m);
-        n = m_m.mk_not(e);
-        std::cerr << '+';
+        n = m_m.mk_not(e);        
         TRACE("miner", tout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;);
         const lbool dv = is_sat(n);
-        std::cerr << '-';
         if (dv == l_undef) return l_undef;
         if (dv == l_false) return l_true;
         SASSERT(dv == l_true);
@@ -361,10 +362,17 @@ struct miner::imp {
     }
 
     lbool is_sat(expr_ref& e, model_ref& mr) {
-        tactic_ref t = mk_qfaufbv_tactic(m_m);
+		params_ref s_p = m_p;
+		s_p.set_uint("max_conflicts", 10000);
+        tactic_ref t = mk_qfaufbv_tactic(m_m, s_p);		
+		
         scoped_ptr<solver> sat = mk_tactic2solver(m_m, t.get());
         sat->assert_expr(e);
+		//std::cout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;		
+		std::cerr << '+';
         const lbool rv = sat->check_sat(0, 0);
+		std::cerr << '-';
+		//std::cout << "end sat call"  << std::endl;
         if (rv == l_true && mr.get())  sat->get_model(mr);
         return rv;
     }
@@ -528,6 +536,7 @@ void miner::imp::mine_eq(app * term) {
     }
     SASSERT(!may_eq || !may_diff);
     model_ref mdl(alloc(model, m_m));
+    bool pop = false;
     if (may_diff || may_eq) {
         expr_ref tt(m_m);
         tt = may_eq ? m_m.mk_not(term) : term;
@@ -536,7 +545,7 @@ void miner::imp::mine_eq(app * term) {
             case l_undef:
                 TRACE("miner", tout  << "undef call: " << mk_ismt2_pp(tt, m_m, 2) << std::endl;);
                 return;
-            case l_true: m_evaluators.push_back(alloc(model_evaluator, *(mdl.get()))); break;
+            case l_true: pop = true; m_evaluators.push_back(alloc(model_evaluator, *(mdl.get()))); break;
             case l_false: if (m_print) if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "->" << (may_eq ? "true" : "false") << std::endl;
                                return;
         }
@@ -566,6 +575,7 @@ void miner::imp::mine_eq(app * term) {
             TRACE("miner", tout  << "rewrite(eq): " << mk_ismt2_pp(term, m_m, 2) << "->" << mk_ismt2_pp(tested_e, m_m, 2) << std::endl;);
         }
     }
+    if (pop) m_evaluators.pop_back();
 }
 
 void miner::imp::mine_term(app * term) {
@@ -641,7 +651,7 @@ void miner::imp::mine_term(app * term) {
     }
 }
 
-miner::miner(ast_manager& m) : m_imp(alloc(imp, m)) {}
+miner::miner(ast_manager& m, params_ref const & p) : m_imp(alloc(imp, m, p)) {}
 void miner::operator() (expr_ref f) { m_imp->operator() (f); }
 void miner::init(expr_ref f) { m_imp->init(f); }
 

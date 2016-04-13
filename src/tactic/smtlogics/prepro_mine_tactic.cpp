@@ -55,7 +55,7 @@ public:
         f = flas.size()==1 ? flas[0]
                            : m.mk_and(flas.size(), flas.c_ptr());
         // running implementation
-        miner imp(m);
+        miner imp(m, m_params);
         imp(f);
         flas.reset();
     }
