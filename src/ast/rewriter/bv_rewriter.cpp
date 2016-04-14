@@ -1267,7 +1267,6 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
     expr * a_arg = NULL;
     expr * bs_arg = NULL;
     bool found = false;
-    const unsigned fused_low = 0;
     for (fused_index = 0; fused_index < (num_args - 1); fused_index++) {
         a = args[fused_index];
         b = args[fused_index + 1];
@@ -1283,12 +1282,20 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
         TRACE("concat_fusion", tout << "attempting: " << mk_ismt2_pp(a, m()) << "\n" << mk_ismt2_pp(b, m()) << "\n";);
         const unsigned sub_num = to_app(a_arg)->get_num_args();
         bool all_fuse = true;
+        numeral as_val, bs_val;
+        unsigned as_sz, bs_sz;
         for (unsigned j = 0; j < sub_num && all_fuse; j++) {
             expr * const as = to_app(a_arg)->get_arg(j);
             expr * const bs = to_app(b)->get_arg(j);
-            all_fuse &= m_util.is_extract(bs, lo_bs, hi_bs, bs_arg);
-            all_fuse &= fused_low == lo_bs && ((1+hi_bs) == lo_a) && bs_arg == as;
-            TRACE("concat_fusion", tout << "compare: " << mk_ismt2_pp(as, m()) << "\n" << mk_ismt2_pp(bs_arg, m()) << "\n";);
+            TRACE("concat_fusion",
+                    tout << "as: " << ": " << mk_ismt2_pp(as, m())
+                         << "\nbs: " << ": " << mk_ismt2_pp(bs, m())
+                    << "\n";);
+            all_fuse = is_numeral(as, as_val, as_sz) ?
+                         (is_numeral(bs, bs_val, bs_sz) && bs_sz == lo_a
+                          && mod(as_val, rational::power_of_two(bs_sz)) == bs_val)
+                       : (m_util.is_extract(bs, lo_bs, hi_bs, bs_arg)
+                         && 0 == lo_bs && ((1+hi_bs) == lo_a) && bs_arg == as);
         }
         if (all_fuse) {
             found = true;
@@ -1296,8 +1303,8 @@ br_status bv_rewriter::fuse_concat(unsigned num_args, expr * const * args, expr_
         }
     }
     if (!found) return BR_FAILED;
-    const bool vacuous_extraction = (hi_a == (get_bv_size(a_arg) - 1)) && (fused_low == 0);
-    expr * const fused = vacuous_extraction ? a_arg : m_mk_extract(hi_a, fused_low, a_arg);
+    const bool vacuous_extraction = (hi_a == (get_bv_size(a_arg) - 1));
+    expr * const fused = vacuous_extraction ? a_arg : m_mk_extract(hi_a, 0, a_arg);
     TRACE("concat_fusion", tout << "fused: " << mk_ismt2_pp(fused, m()) << "\n";);
     switch (num_args) {
         case 0:
