@@ -2137,10 +2137,15 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
         unsigned divisor_sz, rhs_sz;
         if (is_urem_any(lhs, dividend, divisor)
             && is_numeral(rhs, rhs_val, rhs_sz)
-            && is_numeral(divisor, divisor_val, divisor_sz)
-            && ((divisor_val + rhs_val) >= rational::power_of_two(divisor_sz))) {
-            result = m().mk_eq(dividend, rhs);
-            return BR_REWRITE2;
+            && is_numeral(divisor, divisor_val, divisor_sz)) {
+            if (rhs_val >= divisor_val) {
+                result = m().mk_false();
+                return BR_DONE;
+            }
+            if ((divisor_val + rhs_val) >= rational::power_of_two(divisor_sz)) {
+                result = m().mk_eq(dividend, rhs);
+                return BR_REWRITE2;
+            }
         }
     }
 
