@@ -2070,7 +2070,7 @@ br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
 }
 
 bool bv_rewriter::is_urem_any(expr * e, expr * & dividend,  expr * & divisor) {
-    if (!m_util.is_bv_urem(e) && !m_util.is_bv_urem0(e) && !m_util.is_bv_uremi(e))
+    if (!m_util.is_bv_urem(e) && !m_util.is_bv_uremi(e))
         return false;
     const app * const a = to_app(e);
     SASSERT(a->get_num_args() == 2);
