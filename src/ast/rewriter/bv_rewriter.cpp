@@ -29,6 +29,7 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_mul2concat = p.mul2concat();
     m_bit2bool = p.bit2bool();
     m_trailing = p.bv_trailing();
+    m_urem_simpl = p.bv_urem_simpl();
     m_blast_eq_value = p.blast_eq_value();
     m_split_concat_eq = p.split_concat_eq();
     m_udiv2mul = p.udiv2mul();
@@ -2386,6 +2387,16 @@ br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
     return BR_FAILED;
 }
 
+bool bv_rewriter::is_urem_any(expr * e, expr * & dividend,  expr * & divisor) {
+    if (!m_util.is_bv_urem(e) && !m_util.is_bv_uremi(e))
+        return false;
+    const app * const a = to_app(e);
+    SASSERT(a->get_num_args() == 2);
+    dividend = a->get_arg(0);
+    divisor = a->get_arg(1);
+    return true;
+}
+
 br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
     if (lhs == rhs) {
         result = m().mk_true();
@@ -2435,6 +2446,25 @@ br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
         st = mk_blast_eq_value(lhs, rhs, result);
         if (st != BR_FAILED)
             return st;
+    }
+
+    if (m_urem_simpl) {
+        expr * dividend;
+        expr * divisor;
+        numeral divisor_val, rhs_val;
+        unsigned divisor_sz, rhs_sz;
+        if (is_urem_any(lhs, dividend, divisor)
+            && is_numeral(rhs, rhs_val, rhs_sz)
+            && is_numeral(divisor, divisor_val, divisor_sz)) {
+            if (rhs_val >= divisor_val) {
+                result = m().mk_false();
+                return BR_DONE;
+            }
+            if ((divisor_val + rhs_val) >= rational::power_of_two(divisor_sz)) {
+                result = m().mk_eq(dividend, rhs);
+                return BR_REWRITE2;
+            }
+        }
     }
 
     expr_ref new_lhs(m());

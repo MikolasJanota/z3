@@ -66,6 +66,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_extract_prop;
     bool       m_bvnot_simpl;
     bool       m_le_extra;
+    bool       m_urem_simpl;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -175,6 +176,7 @@ public:
             result = m().mk_app(f, num_args, args);
     }
 
+    bool is_urem_any(expr * e, expr * & dividend,  expr * & divisor);
     br_status mk_eq_core(expr * lhs, expr * rhs, expr_ref & result);
     br_status mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resul);
 
