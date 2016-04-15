@@ -243,6 +243,93 @@ expr * bv_rewriter::concat(unsigned num_args, expr * const * args) {
     }
 }
 
+bool bv_rewriter::are_eq_upto_num(expr * _a, expr * _b,
+        expr_ref& common,
+        numeral& a0_val, numeral& b0_val) {
+    const bool aadd = m_util.is_bv_add(_a);
+    const bool badd = m_util.is_bv_add(_b);
+    const bool has_num_a = aadd && to_app(_a)->get_num_args() && is_numeral(to_app(_a)->get_arg(0));
+    const bool has_num_b = badd && to_app(_b)->get_num_args() && is_numeral(to_app(_b)->get_arg(0));
+    a0_val = numeral::zero();
+    b0_val = numeral::zero();
+    if (!aadd && !badd) {
+        if (_a == _b) {
+            common = _a;
+            return true;
+        } else {
+            return false;
+        }
+    }
+    if (!aadd && badd) {
+        if (to_app(_a)->get_num_args() != 2 || !has_num_a || to_app(_a)->get_arg(0) != _b)
+            return false;
+        common = _b;
+        return true;
+    }
+    if (aadd && !badd) {
+        if (to_app(_b)->get_num_args() != 2 || !has_num_b || to_app(_b)->get_arg(0) != _a)
+            return false;
+        common = _a;
+        return true;
+    }
+    SASSERT(aadd && badd);
+    app * const a = to_app(_a);
+    app * const b = to_app(_b);
+    const unsigned numa = a->get_num_args();
+    const unsigned numb = b->get_num_args();
+    if (!numa || !numb) return false;
+    if ((numa - (has_num_a ? 1 : 0)) != (numb - (has_num_b ? 1 : 0))) return false;
+    unsigned ai = has_num_a ? 1 : 0;
+    unsigned bi = has_num_b ? 1 : 0;
+    while (ai < numa) {
+        if (a->get_arg(ai) != b->get_arg(bi)) return false;
+        ++ai;
+        ++bi;
+    }
+    a0_val = numeral::zero();
+    b0_val = numeral::zero();
+    const unsigned sz = m_util.get_bv_size(a);
+    unsigned a0_sz(sz), b0_sz(sz);
+    if (has_num_a) is_numeral(a->get_arg(0), a0_val, a0_sz);
+    if (has_num_b) is_numeral(b->get_arg(0), b0_val, b0_sz);
+    SASSERT(a0_sz == m_util.get_bv_size(a) && b0_sz == m_util.get_bv_size(a));
+    if (has_num_a && numa > 2) {
+        common = m().mk_app(m_util.get_fid(),  add_decl_kind(), numa - 1, a->get_args() + 1);
+    }
+    else {
+        common = has_num_a ? a->get_arg(1) : a;
+    }
+    return true;
+}
+
+br_status bv_rewriter::rw_leq_overflow(bool is_signed, expr * a, expr * b, expr_ref & result) {
+    if (is_signed) return BR_FAILED;
+    expr_ref common(m());
+    numeral a0_val, b0_val;
+    if (!are_eq_upto_num(a, b, common, a0_val, b0_val)) return BR_FAILED;
+    SASSERT(a0_val.is_nonneg() && b0_val.is_nonneg());
+    const unsigned sz = m_util.get_bv_size(a);
+    if (a0_val == b0_val) {
+        result = m().mk_true();
+        return BR_DONE;
+    }
+    if (a0_val < b0_val) {
+        const numeral ac0_val = rational::power_of_two(sz) - a0_val;
+        result = m_util.mk_ule(m_util.mk_numeral(b0_val - a0_val, sz), b);
+        return BR_REWRITE2;
+    }
+    SASSERT(a0_val > b0_val);
+    SASSERT(!a0_val.is_zero());
+    expr * const ac0 = mk_numeral(rational::power_of_two(sz) - a0_val, sz);
+    if (!b0_val.is_zero()) {
+        expr * const bc0m1 = mk_numeral(rational::power_of_two(sz) - b0_val - numeral::one(), sz);
+        result = m().mk_and(m_util.mk_ule(ac0, common), m_util.mk_ule(common, bc0m1));
+    } else {
+        result = m_util.mk_ule(ac0, common);
+    }
+    return BR_REWRITE2;
+}
+
 br_status bv_rewriter::rw_leq_concats(bool is_signed, expr * _a, expr * _b, expr_ref & result) {
     if (!m_util.is_concat(_a) || !m_util.is_concat(_b))
         return BR_FAILED;
@@ -407,6 +494,15 @@ br_status bv_rewriter::mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref 
 
     if (m_le_extra) {
         const br_status cst = rw_leq_concats(is_signed, a, b, result);
+        if (cst != BR_FAILED) {
+            TRACE("le_extra", tout << (is_signed ? "bv_sle\n" : "bv_ule\n")
+                      << mk_ismt2_pp(a, m(), 2) <<  "\n" << mk_ismt2_pp(b, m(), 2) <<  "\n--->\n"<< mk_ismt2_pp(result, m(), 2) << "\n";);
+            return cst;
+        }
+    }
+
+    if (m_le_extra) {
+        const br_status cst = rw_leq_overflow(is_signed, a, b, result);
         if (cst != BR_FAILED) {
             TRACE("le_extra", tout << (is_signed ? "bv_sle\n" : "bv_ule\n")
                       << mk_ismt2_pp(a, m(), 2) <<  "\n" << mk_ismt2_pp(b, m(), 2) <<  "\n--->\n"<< mk_ismt2_pp(result, m(), 2) << "\n";);
