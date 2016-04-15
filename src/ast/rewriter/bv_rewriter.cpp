@@ -320,12 +320,18 @@ br_status bv_rewriter::rw_leq_overflow(bool is_signed, expr * a, expr * b, expr_
     }
     SASSERT(a0_val > b0_val);
     SASSERT(!a0_val.is_zero());
-    expr * const ac0 = mk_numeral(rational::power_of_two(sz) - a0_val, sz);
-    if (!b0_val.is_zero()) {
-        expr * const bc0m1 = mk_numeral(rational::power_of_two(sz) - b0_val - numeral::one(), sz);
-        result = m().mk_and(m_util.mk_ule(ac0, common), m_util.mk_ule(common, bc0m1));
-    } else {
-        result = m_util.mk_ule(ac0, common);
+    const numeral lower = rational::power_of_two(sz) - a0_val;
+    const numeral upper = rational::power_of_two(sz) - b0_val - numeral::one();
+    if (lower == upper) {
+        result = m().mk_eq(common, mk_numeral(lower, sz));
+    }
+    else if (b0_val.is_zero()) {
+        result = m_util.mk_ule(mk_numeral(lower, sz), common);
+    }
+    else {
+        SASSERT(lower.is_pos());
+        result = m().mk_and(m_util.mk_ule(mk_numeral(lower, sz), common),
+                            m_util.mk_ule(common, mk_numeral(upper, sz)));
     }
     return BR_REWRITE2;
 }
