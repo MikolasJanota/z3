@@ -66,6 +66,7 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     bool       m_extract_prop;
     bool       m_bvnot_simpl;
     bool       m_le_extra;
+    bool       m_urem_simpl;
 
     bool is_zero_bit(expr * x, unsigned idx);
 
@@ -76,6 +77,8 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     br_status mk_sge(expr * a, expr * b, expr_ref & result);
     br_status mk_slt(expr * a, expr * b, expr_ref & result);
     br_status rw_leq_concats(bool is_signed, expr * a, expr * b, expr_ref & result);
+    bool are_eq_upto_num(expr * a, expr * b, expr_ref& common, numeral& a0_val, numeral& b0_val);
+    br_status rw_leq_overflow(bool is_signed, expr * _a, expr * _b, expr_ref & result);
     br_status mk_leq_core(bool is_signed, expr * a, expr * b, expr_ref & result);
 
     br_status fuse_concat(unsigned num_args, expr * const * args, expr_ref & result);
@@ -177,6 +180,7 @@ public:
 
     bool has_bound_u(expr * e, numeral& l, numeral& h);
 
+    bool is_urem_any(expr * e, expr * & dividend,  expr * & divisor);
     br_status mk_eq_core(expr * lhs, expr * rhs, expr_ref & result);
     br_status mk_ite_core(expr * c, expr * t, expr * e, expr_ref & resul);
 
