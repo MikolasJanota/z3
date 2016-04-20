@@ -37,12 +37,14 @@ bool bv_bounds::add_constraint(expr* e) {
     numeral val, val1;
 	unsigned bv_sz1;
 
-	if (m_m.is_eq(e, lhs, rhs) && to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz1)) {
-		return add_bound_unsigned(to_app(lhs), val, val, negated);
-	}
+	if (0) {
+		if (m_m.is_eq(e, lhs, rhs) && to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz1)) {
+			return add_bound_unsigned(to_app(lhs), val, val, negated);
+		}
 
-	if (m_m.is_eq(e, lhs, rhs) && to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz1)) {
-		return add_bound_unsigned(to_app(rhs), val, val, negated);
+		if (m_m.is_eq(e, lhs, rhs) && to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz1)) {
+			return add_bound_unsigned(to_app(rhs), val, val, negated);
+		}
 	}
 
 
@@ -65,33 +67,35 @@ bool bv_bounds::add_constraint(expr* e) {
             return add_bound_unsigned(to_app(rhs), mod - val, mod - numeral::one(), negated);
         }
 
-		if (m_bv_util.is_bv_add(rhs, t1, t2)
-			&& m_bv_util.is_numeral(t1, val, bv_sz)
-			&& to_bound(t2)
-			&& m_bv_util.is_numeral(lhs, val1, bv_sz1)) {  // val1 <= val + v
-			SASSERT(bv_sz1 == bv_sz);
-			if (!val.is_pos() || !val1.is_pos()) return m_okay;
-			const numeral mod = numeral::power_of_two(bv_sz);
-			if (val1 < val) {
-				return add_bound_unsigned(to_app(t2), mod - val + numeral::one(), mod + val1 - val - numeral::one(), !negated);
+		if (0) {
+			if (m_bv_util.is_bv_add(rhs, t1, t2)
+				&& m_bv_util.is_numeral(t1, val, bv_sz)
+				&& to_bound(t2)
+				&& m_bv_util.is_numeral(lhs, val1, bv_sz1)) {  // val1 <= val + v
+				SASSERT(bv_sz1 == bv_sz);
+				if (!val.is_pos() || !val1.is_pos()) return m_okay;
+				const numeral mod = numeral::power_of_two(bv_sz);
+				if (val1 < val) {
+					return add_bound_unsigned(to_app(t2), mod - val, mod + val1 - val - numeral::one(), !negated);
+				}
+				else {
+					return add_bound_unsigned(to_app(t2), val1 - val, mod - val - numeral::one(), negated);
+				}
 			}
-			else {
-				return add_bound_unsigned(to_app(t2), val1 - val, mod - val - numeral::one(), negated);
-			}
-		}
 
-		if (m_bv_util.is_bv_add(lhs, t1, t2)
-			&& m_bv_util.is_numeral(t1, val, bv_sz)
-			&& to_bound(t2)
-			&& m_bv_util.is_numeral(rhs, val1, bv_sz1)) {  // val + v <= val1
-			SASSERT(bv_sz1 == bv_sz);
-			if (!val.is_pos() || !val1.is_pos()) return m_okay;
-			const numeral mod = numeral::power_of_two(bv_sz);
-			if (val < val1) {
-				return add_bound_unsigned(to_app(t2), val1 - val + numeral::one(), mod - val - numeral::one(), !negated);
-			}
-			else {
-				return add_bound_unsigned(to_app(t2), mod - val, mod + val - val1, negated);
+			if (m_bv_util.is_bv_add(lhs, t1, t2)
+				&& m_bv_util.is_numeral(t1, val, bv_sz)
+				&& to_bound(t2)
+				&& m_bv_util.is_numeral(rhs, val1, bv_sz1)) {  // val + v <= val1
+				SASSERT(bv_sz1 == bv_sz);
+				if (!val.is_pos() || !val1.is_pos()) return m_okay;
+				const numeral mod = numeral::power_of_two(bv_sz);
+				if (val < val1) {
+					return add_bound_unsigned(to_app(t2), val1 - val + numeral::one(), mod - val - numeral::one(), !negated);
+				}
+				else {
+					return add_bound_unsigned(to_app(t2), mod - val, mod + val - val1, negated);
+				}
 			}
 		}
 
