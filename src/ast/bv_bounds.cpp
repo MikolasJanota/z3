@@ -34,7 +34,17 @@ bool bv_bounds::add_constraint(expr* e) {
     }
 
     expr *lhs, *rhs;
-    numeral val;
+    numeral val, val1;
+	unsigned bv_sz1;
+
+	if (m_m.is_eq(e, lhs, rhs) && to_bound(lhs) && m_bv_util.is_numeral(rhs, val, bv_sz1)) {
+		return add_bound_unsigned(to_app(lhs), val, val, negated);
+	}
+
+	if (m_m.is_eq(e, lhs, rhs) && to_bound(rhs) && m_bv_util.is_numeral(lhs, val, bv_sz1)) {
+		return add_bound_unsigned(to_app(rhs), val, val, negated);
+	}
+
 
     if (m_bv_util.is_bv_ule(e, lhs, rhs)) {
         unsigned bv_sz = m_bv_util.get_bv_size(lhs);
@@ -55,6 +65,38 @@ bool bv_bounds::add_constraint(expr* e) {
             return add_bound_unsigned(to_app(rhs), mod - val, mod - numeral::one(), negated);
         }
 
+		if (m_bv_util.is_bv_add(rhs, t1, t2)
+			&& m_bv_util.is_numeral(t1, val, bv_sz)
+			&& to_bound(t2)
+			&& m_bv_util.is_numeral(lhs, val1, bv_sz1)) {  // val1 <= val + v
+			SASSERT(bv_sz1 == bv_sz);
+			if (!val.is_pos() || !val1.is_pos()) return m_okay;
+			const numeral mod = numeral::power_of_two(bv_sz);
+			if (val1 < val) {
+				return add_bound_unsigned(to_app(t2), mod - val + numeral::one(), mod + val1 - val - numeral::one(), !negated);
+			}
+			else {
+				return add_bound_unsigned(to_app(t2), val1 - val, mod - val - numeral::one(), negated);
+			}
+		}
+
+		if (m_bv_util.is_bv_add(lhs, t1, t2)
+			&& m_bv_util.is_numeral(t1, val, bv_sz)
+			&& to_bound(t2)
+			&& m_bv_util.is_numeral(rhs, val1, bv_sz1)) {  // val + v <= val1
+			SASSERT(bv_sz1 == bv_sz);
+			if (!val.is_pos() || !val1.is_pos()) return m_okay;
+			const numeral mod = numeral::power_of_two(bv_sz);
+			if (val < val1) {
+				return add_bound_unsigned(to_app(t2), val1 - val + numeral::one(), mod - val - numeral::one(), !negated);
+			}
+			else {
+				return add_bound_unsigned(to_app(t2), mod - val, mod + val - val1, negated);
+			}
+		}
+
+
+		// v + c1 <= v + c2
         app * v1(NULL), *v2(NULL);
         numeral val1, val2;
         if (is_constant_add(bv_sz, lhs, v1, val1)
@@ -93,7 +135,7 @@ bool bv_bounds::add_constraint(expr* e) {
 }
 
 bool bv_bounds::add_bound_unsigned(app * v, numeral a, numeral b, bool negate) {
-    TRACE("bv_bounds", tout << "bound_unsigned " << mk_ismt2_pp(v, m_m) << ":" << (negate ? "~" : " ") << a << ";" << b << std::endl;);
+    TRACE("bv_bounds", tout << "bound_unsigned " << mk_ismt2_pp(v, m_m) << ": " << (negate ? "~[" : "[") << a << ";" << b  << "]" << std::endl;);
     const unsigned bv_sz = m_bv_util.get_bv_size(v);
     const numeral& zero = numeral::zero();
     const numeral& one = numeral::one();

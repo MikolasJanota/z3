@@ -77,7 +77,7 @@ protected:
 inline bool bv_bounds::is_okay() { return m_okay; }
 
 inline bool bv_bounds::to_bound(const expr * e) const {
-    return is_app(e) && m_bv_util.is_bv(e);
+	return is_app(e) && m_bv_util.is_bv(e) && !m_bv_util.is_bv_add(e) && !m_bv_util.is_numeral(e);
 }
 
 inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {
