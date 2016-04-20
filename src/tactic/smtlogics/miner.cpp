@@ -127,7 +127,8 @@ struct miner::imp {
     void mine_term_bf(app * term);
     void mine_term(app * term);
     model tmp_mdl;
-    void mine_bool_bin(app * term);
+    bool mine_bool_bin(app * term);
+    bool mine_bv_app(app * term);
 
     void make_values(app* a, expr_ref_vector& a_values) {
         a_values.reset();
@@ -348,7 +349,6 @@ struct miner::imp {
     lbool is_tautology(expr_ref e) {
         expr_ref n(m_m);
         n = m_m.mk_not(e);        
-        TRACE("miner", tout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;);
         const lbool dv = is_sat(n);
         if (dv == l_undef) return l_undef;
         if (dv == l_false) return l_true;
@@ -365,7 +365,7 @@ struct miner::imp {
 		params_ref s_p = m_p;
 		s_p.set_uint("max_conflicts", 10000);
         tactic_ref t = mk_qfaufbv_tactic(m_m, s_p);		
-		
+		TRACE("miner_sat_call", tout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;);
         scoped_ptr<solver> sat = mk_tactic2solver(m_m, t.get());
         sat->assert_expr(e);
 		//std::cout << "sat call" << mk_ismt2_pp(e, m_m, 2) << std::endl;		
@@ -510,7 +510,98 @@ void miner::imp::mine_term_bf(app * term) {
     dealloc(eg);
 }
 
-void miner::imp::mine_bool_bin(app * term) {
+bool  miner::imp::mine_bv_app(app * term) {
+    TRACE("miner", tout << "mine_bv_app: " << mk_ismt2_pp(term, m_m, 2) << std::endl;);
+    expr_ref_vector term_values(m_m);
+    make_values(term, term_values);
+    const unsigned num = term->get_num_args();
+    bool may_const = true;
+    expr_ref value0(m_m);
+    value0 = term_values.get(0);
+    SASSERT(term->get_decl()->get_range() == m_m.get_sort(value0));
+    for (unsigned i = 1; i < term_values.size() && may_const; i++) {
+        if (!m_m.are_equal(term_values.get(i), value0.get())) may_const = false;
+    }
+    model_ref mdl(alloc(model, m_m));
+    expr_ref new_val(m_m);
+    bool pop = false;
+    if (may_const) {
+        expr_ref tt(m_m);
+        tt = m_m.mk_not(m_m.mk_eq(term, value0));
+        const lbool r = is_sat(tt, mdl);
+        switch (r) {
+            case l_undef:
+                TRACE("miner", tout  << "undef call: " << mk_ismt2_pp(tt, m_m, 2) << std::endl;);
+                return false;
+            case l_true: {
+                             pop = true;
+                             m_evaluators.push_back(alloc(model_evaluator, *(mdl.get())));
+                             (m_evaluators.back())->operator()(term, new_val);
+                             term_values.push_back(new_val);
+                             break;
+                         }
+            case l_false: if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "--->" << mk_ismt2_pp(term, m_m, 2) << std::endl;
+                          return true;
+        }
+    }
+    ptr_vector<expr_collector> collectors;
+    for (unsigned i = 0; i < num; i++) {
+        app * const oarg = to_app(term->get_arg(i));
+        collectors.push_back(alloc(expr_collector, m_m, oarg->get_decl()->get_range(), oarg));
+        (collectors[i])->visit();
+    }
+    vector<unsigned> idx;
+    for (unsigned i = 0; i < num; i++) idx.push_back(0);
+    expr_ref_vector nargs(m_m);
+    app_ref oarg(m_m);
+    expr_ref narg(m_m);
+    while (1) {
+        nargs.reset();
+	bool oeq = true;
+	for (unsigned i = 0; i < num; i++) {
+		expr_ref_vector & cls = (collectors[i])->collected();
+		oarg = to_app(term->get_arg(i));
+		narg = cls.get(idx[i]);
+		if (oarg.get() != narg.get()) oeq = false;
+		nargs.push_back(narg);
+	}
+	if (!oeq) {
+            expr_ref tested_e(m_m);
+            tested_e = m_m.mk_app(term->get_family_id(), term->get_decl_kind(), nargs.size(), nargs.c_ptr());
+            //std::cout << "tested_e: " << mk_ismt2_pp(tested_e, m_m, 2) << std::endl;
+            if (check_equality(term, term_values, tested_e) == l_true) {
+                 if (m_print) std::cout << "rewrite(bv): " << mk_ismt2_pp(term, m_m, 2) << "--->" << mk_ismt2_pp(tested_e, m_m, 2) << std::endl;
+                 TRACE("miner", tout << "rewrite(bv): " << mk_ismt2_pp(term, m_m, 2) << "--->" << mk_ismt2_pp(tested_e, m_m, 2) << std::endl;);
+             }
+            nargs.reset();
+        }
+        unsigned c = 1;
+        for (unsigned i = 0; i < num; i++) {
+            const unsigned numi = ((collectors[i])->collected()).size();
+            if (!numi) continue;
+            const unsigned idx1 = idx[i] + c;
+            idx[i] = idx1 % numi;
+            c = idx1 / numi;
+            if (c == 0) break;
+        }
+        if (c > 0) break;
+    }
+
+    while (collectors.size()) {
+        dealloc(collectors.back());
+        collectors.pop_back();
+    }
+
+    if (pop) {
+        dealloc(m_evaluators.back());
+        m_evaluators.pop_back();
+    }
+
+    term_values.reset();
+    return false;
+}
+
+bool miner::imp::mine_bool_bin(app * term) {
     TRACE("miner", tout << "mine_bool_bin: " << mk_ismt2_pp(term, m_m, 2) << std::endl;);
     SASSERT(m_m.is_eq(term) || (m_m.is_bool(term->get_decl()->get_range()) && term->get_num_args() == 2));
     expr_ref_vector term_values(m_m);
@@ -535,19 +626,19 @@ void miner::imp::mine_bool_bin(app * term) {
         switch (r) {
             case l_undef:
                 TRACE("miner", tout  << "undef call: " << mk_ismt2_pp(tt, m_m, 2) << std::endl;);
-                return;
+                return false;
             case l_true:
                   pop = true;
                   m_evaluators.push_back(alloc(model_evaluator, *(mdl.get())));
                   term_values.push_back(may_true ? m_m.mk_false() : m_m.mk_true());
                   break;
-            case l_false: if (m_print) if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "--->" << (may_true ? "true" : "false") << std::endl;
-                               return;
+            case l_false: if (m_print) std::cout << "const: " << mk_ismt2_pp(term, m_m, 2) << "--->" << (may_true ? "true" : "false") << std::endl;
+                               return true;
         }
     }
     expr * const _a = term->get_arg(0);
     expr * const _b = term->get_arg(1);
-    if (!to_app(_a) || !to_app(_b)) return;
+    if (!to_app(_a) || !to_app(_b)) return false;
     app * const a = to_app(_a);
     app * const b = to_app(_b);
     expr_collector collector_a(m_m, a->get_decl()->get_range(), a);
@@ -574,11 +665,12 @@ void miner::imp::mine_bool_bin(app * term) {
             TRACE("miner", tout  << "rewrite(bool2): " << mk_ismt2_pp(term, m_m, 2) << "--->" << mk_ismt2_pp(tested_e, m_m, 2) << std::endl;);
         }
     }
-	if (pop) {
-		term_values.reset();
-		dealloc(m_evaluators.back());
-		m_evaluators.pop_back();
-	}
+    if (pop) {
+        dealloc(m_evaluators.back());
+        m_evaluators.pop_back();
+    }
+    term_values.reset();
+    return false;
 }
 
 void miner::imp::mine_term(app * term) {
@@ -589,8 +681,12 @@ void miner::imp::mine_term(app * term) {
 	TRACE("miner", tout << "mining: " << mk_ismt2_pp(term, m_m, 2) << std::endl;);
 
     if (m_m.is_eq(term) || (m_m.is_bool(term->get_decl()->get_range()) && term->get_num_args() == 2)) {
-        mine_bool_bin(term);
-        return;
+        if (mine_bool_bin(term)) return;
+    }
+    else {
+        if (m_bv_util.is_bv_sort(term->get_decl()->get_range())) {
+            if (mine_bv_app(term)) return;
+        }
     }
 
     expr_ref constant_value(m_m);
