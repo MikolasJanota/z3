@@ -32,7 +32,6 @@ namespace qe {
 
     bool is_divides(arith_util& a, expr* e1, expr* e2, rational& k, expr_ref& p) {  
         expr* t1, *t2;
-        ast_manager& m = a.get_manager();
         if (a.is_mod(e2, t1, t2) && 
             a.is_numeral(e1, k) && 
             k.is_zero() &&
@@ -117,9 +116,10 @@ namespace qe {
             else if (extract_mod(model, t, val)) {
                 ts.push_back(mk_mul(mul, val));
             }
-            else if (m.is_ite(t, t1, t2, t3)) {
+            else if (m.is_ite(t, t1, t2, t3)) {                
                 VERIFY(model.eval(t1, val));
                 SASSERT(m.is_true(val) || m.is_false(val));
+                TRACE("qe", tout << mk_pp(t1, m) << " := " << val << "\n";);
                 if (m.is_true(val)) {
                     is_linear(model, mul, t2, c, ts); 
                 }
