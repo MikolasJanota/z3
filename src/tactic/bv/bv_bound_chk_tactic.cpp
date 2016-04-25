@@ -32,7 +32,7 @@ struct bv_bound_chk_stats {
 struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     ast_manager &       m_m;
     unsigned                 m_bv_ineq_consistency_test_max;
-    bool_rewriter         m_b_rw;
+    bool_rewriter       m_b_rw;
     unsigned long long  m_max_steps;
     unsigned long long  m_max_memory; // in bytes
     bv_bound_chk_stats& m_stats;
@@ -71,31 +71,11 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
         const family_id fid = f->get_family_id();
         if (fid != m_b_rw.get_fid()) return BR_FAILED;
         const decl_kind k = f->get_decl_kind();
-        if (k == OP_AND && num < m_bv_ineq_consistency_test_max) {
-            bv_bounds bvb(m());
-            for (unsigned i = 0; i < num; ++i) bvb.add_constraint(args[i]);
-            if (!bvb.is_sat()) {
-                m_stats.m_unsats++;
-                result = m_m.mk_false();
-                return BR_DONE;
-            }
-            const bv_bounds::bound_map& singletons = bvb.singletons();
-            expr_ref_vector nargs(m_m);
-            expr_ref eq(m_m);
-            for (bv_bounds::bound_map::iterator i = singletons.begin(); i != singletons.end(); ++i) {
-                app * const v = i->m_key;
-                const rational val = i->m_value;
-                eq = m_m.mk_eq(v, bvb.bvu().mk_numeral(val, v->get_decl()->get_range()));
-                nargs.push_back(eq);
-            }
-            if (!nargs.empty()) {
-                m_stats.m_singletons++;
-                nargs.append(num, args);
-                result = m_m.mk_and(nargs.size(), nargs.c_ptr());
-                return BR_DONE;
-            }
-        }
-        return BR_FAILED;
+		bv_bounds bvb(m());
+		const br_status rv = bvb.rewrite(m_bv_ineq_consistency_test_max, f, num, args, result);
+		if (rv != BR_FAILED && m_m.is_false(result)) m_stats.m_unsats++;
+		if (rv != BR_FAILED && bvb.singletons().size()) m_stats.m_singletons++;
+		return rv;
     }
 
     bool max_steps_exceeded(unsigned long long num_steps) const {
