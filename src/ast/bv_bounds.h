@@ -59,7 +59,19 @@ public:
     bool is_okay();
     const bound_map& singletons() { return m_singletons; }
     bv_util& bvu() { return m_bv_util;  }
+    void reset();
 protected:
+    struct ninterval {
+        //ninterval(app * v, numeral lo, numeral hi, bool negated) : v(v), lo(lo), hi(hi), negated(negated) {}
+        app * v;
+        numeral lo, hi;
+        bool negated;
+    };
+    enum conv_res { CONVERTED, UNSAT, UNDEF };
+    conv_res convert(expr * e, vector<ninterval>& nis);
+    conv_res record(app * v, numeral lo, numeral hi, bool negated, vector<ninterval>& nis);
+    conv_res convert_signed(app * v, numeral a, numeral b, bool negate, vector<ninterval>& nis);
+
     typedef vector<interval>            intervals;
     typedef obj_map<app, intervals*>    intervals_map;
     ast_manager&              m_m;
