@@ -68,7 +68,7 @@ protected:
         bool negated;
     };
     enum conv_res { CONVERTED, UNSAT, UNDEF };
-    conv_res convert(expr * e, vector<ninterval>& nis);
+    conv_res convert(expr * e, vector<ninterval>& nis, bool negated);
     conv_res record(app * v, numeral lo, numeral hi, bool negated, vector<ninterval>& nis);
     conv_res convert_signed(app * v, numeral a, numeral b, bool negate, vector<ninterval>& nis);
 
@@ -87,13 +87,16 @@ protected:
     inline bool               is_constant_add(unsigned bv_sz, expr * e, app*& v, numeral& val);
     void                      record_singleton(app * v,  numeral& singleton_value);
     inline bool               to_bound(const expr * e) const;
+    bool is_uleq(expr * e, expr * &  v, numeral & c);
 };
 
 
 inline bool bv_bounds::is_okay() { return m_okay; }
 
 inline bool bv_bounds::to_bound(const expr * e) const {
-	return is_app(e) && m_bv_util.is_bv(e) && !m_bv_util.is_bv_add(e) && !m_bv_util.is_numeral(e);
+	return is_app(e) && m_bv_util.is_bv(e)
+       && !m_bv_util.is_bv_add(e)
+       && !m_bv_util.is_numeral(e);
 }
 
 inline bool bv_bounds::in_range(app *v, bv_bounds::numeral n) {

@@ -26,6 +26,23 @@ bv_bounds::~bv_bounds() {
 
 bv_bounds::conv_res bv_bounds::record(app * v, numeral lo, numeral hi, bool negated, vector<ninterval>& nis) {
 	TRACE("bv_bounds", tout << "record " << mk_ismt2_pp(v, m_m) << ":" << (negated ? "~[" : "[") << lo << ";" << hi << "]" << std::endl;);
+	const unsigned bv_sz = m_bv_util.get_bv_size(v);
+	const numeral& zero = numeral::zero();
+	const numeral& one = numeral::one();
+	SASSERT(zero <= lo);
+	SASSERT(lo <= hi);
+	SASSERT(hi < numeral::power_of_two(bv_sz));
+	if (negated) {
+        const bool lo_min = lo == zero;
+        const numeral max = numeral::power_of_two(bv_sz) - one;
+        const bool hi_max = hi == max;
+		if (lo_min && hi_max) return CONVERTED;
+		if (lo_min) { negated = false; lo = hi + one; hi = max; }
+        else if (hi_max)  { negated = false; hi = lo - one; lo = zero;  }
+        SASSERT(zero <= lo);
+        SASSERT(lo <= hi);
+        SASSERT(hi < numeral::power_of_two(bv_sz));
+	}
     nis.resize(nis.size() + 1);
     nis.back().v = v;
     nis.back().lo = lo;
@@ -34,12 +51,45 @@ bv_bounds::conv_res bv_bounds::record(app * v, numeral lo, numeral hi, bool nega
     return CONVERTED;
 }
 
-bv_bounds::conv_res bv_bounds::convert(expr * e, vector<ninterval>& nis) {
+bool bv_bounds::is_uleq(expr * e, expr * & v, numeral & c) {
+    // m().mk_and(
+    // m().mk_eq(m_mk_extract(bv_sz - 1, first_non_zero + 1, a), m_util.mk_numeral(numeral(0), bv_sz - first_non_zero - 1)),
+    // m_util.mk_ule(m_mk_extract(first_non_zero, 0, a), m_mk_extract(first_non_zero, 0, b)));
+    expr * eq;
+    expr * eql;
+    expr * eqr;
+    expr * ule;
+    expr * ulel;
+    expr * uler;
+    numeral eqr_val, uleqr_val;
+    unsigned eqr_sz, uleqr_sz;
+    if (!m_m.is_and(e, eq, ule)) return false;
+    if (!m_m.is_eq(eq, eql, eqr)) return false;
+    if (!m_bv_util.is_bv_ule(ule, ulel, uler)) return false;
+    if (!m_bv_util.is_extract(eql)) return false;
+    expr * const eql0 = to_app(eql)->get_arg(0);
+    const unsigned eql0_sz = m_bv_util.get_bv_size(eql0);
+    if (!m_bv_util.get_extract_high(eql) == (eql0_sz - 1)) return false;
+    if (!m_bv_util.is_numeral(eqr, eqr_val, eqr_sz)) return false;
+    if (!eqr_val.is_zero()) return false;
+    if (!m_bv_util.is_extract(ulel)) return false;
+    expr * const ulel0 = to_app(ulel)->get_arg(0);
+    if (ulel0 != eql0) return false;
+    if ((m_bv_util.get_extract_high(ulel) + 1) != m_bv_util.get_extract_low(eql)) return false;
+    if (!m_bv_util.get_extract_low(ulel) == 0) return false;
+    if (!m_bv_util.is_numeral(uler, uleqr_val, uleqr_sz)) return false;
+    SASSERT(m_bv_util.get_bv_size(ulel0) == uleqr_sz + eqr_sz);
+    v = ulel0;
+    c = uleqr_val;
+    return true;
+
+}
+
+bv_bounds::conv_res bv_bounds::convert(expr * e, vector<ninterval>& nis, bool negated) {
 	TRACE("bv_bounds", tout << "new constraint" << mk_ismt2_pp(e, m_m) << std::endl;);
 
-	bool negated = false;
 	if (m_m.is_not(e)) {
-		negated = true;
+		negated = !negated;
 		e = to_app(e)->get_arg(0);
 	}
 
@@ -56,6 +106,26 @@ bv_bounds::conv_res bv_bounds::convert(expr * e, vector<ninterval>& nis) {
 			return record(to_app(rhs), val, val, negated, nis);
 		}
 	}
+
+	if (is_uleq(e, lhs, val) && to_bound(lhs)) {
+        return record(to_app(lhs), numeral::zero(), val, negated, nis);
+    }
+
+    {
+        numeral rhs_val;
+        unsigned rhs_sz;
+        if (m_m.is_eq(e, lhs, rhs)
+                && m_bv_util.is_numeral(rhs, rhs_val, rhs_sz)
+                && rhs_val.is_zero()
+                && m_bv_util.is_extract(lhs)) {
+            expr * lhs0 = to_app(lhs)->get_arg(0);
+            unsigned lhs0_sz = m_bv_util.get_bv_size(lhs0);
+            if (m_bv_util.get_extract_high(lhs)+1 == lhs0_sz) {
+                const  numeral u = numeral::power_of_two(m_bv_util.get_extract_low(lhs)) - numeral::one();
+                return record(to_app(lhs0), numeral::zero(), u, negated, nis);
+            }
+        }
+    }
 
 	if (m_bv_util.is_bv_ule(e, lhs, rhs)) {
 		unsigned bv_sz = m_bv_util.get_bv_size(lhs);
@@ -163,14 +233,15 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
 	const family_id fid = f->get_family_id();
 	if (!m_m.is_bool(f->get_range())) return BR_FAILED;
 	const decl_kind k = f->get_decl_kind();
-	if (k != OP_AND || num > limit) return BR_FAILED;
+	if ((k != OP_OR && k != OP_AND) || num > limit) return BR_FAILED;
+    const bool negated = k == OP_OR;
     vector<ninterval> nis;
     vector<unsigned> lengths;
     vector<bool> ignore;
     unsigned nis_head = 0;
     for (unsigned i = 0; i < num && m_okay; ++i) {
         expr * const curr = args[i];
-        const conv_res cr = convert(curr, nis);
+        const conv_res cr = convert(curr, nis, negated);
         ignore.push_back(cr == UNDEF);
         switch (cr) {
           case UNDEF: continue;
@@ -189,7 +260,7 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
         }
     }
 	if (!m_okay || !is_sat()) {
-		result = m_m.mk_false();
+		result = negated ?  m_m.mk_true() : m_m.mk_false();
 		return BR_DONE;
 	}
     nis_head = 0;
@@ -203,7 +274,7 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
             nargs.push_back(args[i]);
             continue;
         }
-        bool redundant = true;
+        bool redundant = false;
         bool is_singl = false;
         if (nis_head < lengths[count]) {
             app * const v = nis[nis_head].v;
@@ -216,18 +287,19 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
             if (!has_upper) th = (numeral::power_of_two(bv_sz) - one);
             TRACE("bv_bounds", tout << "bounds: " << mk_ismt2_pp(v, m_m) << "[" << tl << "-" << th << "]" << std::endl;);
             is_singl = tl == th;
-            if (!is_singl) {
-                for (unsigned i = nis_head; i < lengths[count] && redundant; ++i) {
-                    const ninterval& ni = nis[i];
-                    TRACE("bv_bounds", tout << "ni: " << (ni.negated ? "~[" : "[") << ni.lo << ";" << ni.hi << "]" << std::endl;);
-                    SASSERT(ni.v == v);
-                    if (ni.negated) {
-                        redundant &= (ni.lo > (th + one)) && (ni.hi < (tl - one));
-                    } else {
-                        redundant &= tl < ni.lo  && ni.hi < th;
-                    }
-                }
-            }
+//             if (!is_singl) {
+//                 for (unsigned i = nis_head; i < lengths[count] && redundant; ++i) {
+//                     const ninterval& ni = nis[i];
+//                     TRACE("bv_bounds", tout << "ni: " << (ni.negated ? "~[" : "[") << ni.lo << ";" << ni.hi << "]" << std::endl;);
+//                     SASSERT(ni.v == v);
+//                     if (ni.negated) {
+//                         redundant = false;
+//                         //redundant &= (ni.lo > (th + one)) || (ni.hi < (tl - one));
+//                     } else {
+//                         redundant = tl < ni.lo  && ni.hi < th;
+//                     }
+//                 }
+//             }
             nis_head = lengths[count];
         }
         if (!redundant && !is_singl) nargs.push_back(args[i]);
@@ -243,13 +315,17 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
    		app * const v = i->m_key;
    		const rational val = i->m_value;
    		eq = m_m.mk_eq(v, bvu().mk_numeral(val, v->get_decl()->get_range()));
+        if (negated) eq = m_m.mk_not(eq);
    		nargs.push_back(eq);
    	}
 
     switch (nargs.size()) {
-        case 0: result = m_m.mk_true(); return BR_DONE;
-        case 1: result = nargs.get(0); return BR_REWRITE1;
-        default: result = m_m.mk_and(nargs.size(), nargs.c_ptr()); return BR_REWRITE1;
+        case 0: result = negated ? m_m.mk_false() : m_m.mk_true(); return BR_DONE;
+        case 1: result = nargs.get(0); return BR_DONE;
+        default: result = negated ?
+                   m_m.mk_or(nargs.size(), nargs.c_ptr())
+                 : m_m.mk_and(nargs.size(), nargs.c_ptr());
+                 return BR_DONE;
     }
 }
 
@@ -576,7 +652,7 @@ bool bv_bounds::is_sat_core(app * v) {
 	if (!has_upper) upper = (numeral::power_of_two(bv_sz) - one);
 	TRACE("bv_bounds", tout << "is_sat bound:" << lower << "-" << upper << std::endl;);
 	intervals * negative_intervals(NULL);
-	const bool has_neg_intervals = m_negative_intervals.find(v, negative_intervals);	
+	const bool has_neg_intervals = m_negative_intervals.find(v, negative_intervals);
 	bool is_sat(false);
 	numeral new_lo = lower;
 	numeral new_hi = lower - one;
@@ -588,13 +664,16 @@ bool bv_bounds::is_sat_core(app * v) {
 		for (intervals::const_iterator i = negative_intervals->begin(); i != e; ++i) {
 			const numeral negative_lower = i->first;
 			const numeral negative_upper = i->second;
+            if (ptr > negative_upper) continue;
 			if (ptr < negative_lower) {
 				if (!is_sat) new_lo = ptr;
 				new_hi = negative_lower - one;
+                if (new_hi > upper) new_hi = upper;
 				is_sat = true;
 			}
+            TRACE("bv_bounds", tout << "is_sat new_lo, new_hi:" << new_lo << "-" << new_hi << std::endl;);
 			ptr = negative_upper + one;
-			TRACE("bv_bounds", tout << "is_sat bound:" << lower << "-" << upper << std::endl;);
+			TRACE("bv_bounds", tout << "is_sat ptr, new_hi:" << ptr << "-" << new_hi << std::endl;);
 			if (ptr > upper) break;
 		}
 	}
@@ -606,6 +685,7 @@ bool bv_bounds::is_sat_core(app * v) {
 	}
     if (new_hi < upper) bound_up(v, new_hi);
     if (new_lo > lower) bound_lo(v, new_lo);
+    TRACE("bv_bounds", tout << "is_sat new_lo, new_hi:" << new_lo << "-" << new_hi << std::endl;);
 
 	const bool is_singleton = is_sat && new_hi == new_lo;
 	if (is_singleton) record_singleton(v, new_lo);
