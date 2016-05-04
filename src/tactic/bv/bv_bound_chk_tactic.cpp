@@ -26,7 +26,8 @@
 struct bv_bound_chk_stats {
     unsigned            m_unsats;
     unsigned            m_singletons;
-    bv_bound_chk_stats() : m_unsats(0), m_singletons(0) {};
+    unsigned            m_reduces;
+    bv_bound_chk_stats() : m_unsats(0), m_singletons(0), m_reduces(0) {};
 };
 
 struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
@@ -71,11 +72,12 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
         const family_id fid = f->get_family_id();
         if (fid != m_b_rw.get_fid()) return BR_FAILED;
         const decl_kind k = f->get_decl_kind();
-		bv_bounds bvb(m());
-		const br_status rv = bvb.rewrite(m_bv_ineq_consistency_test_max, f, num, args, result);
-		if (rv != BR_FAILED && (m_m.is_false(result) || m_m.is_true(result))) m_stats.m_unsats++;
-		if (rv != BR_FAILED && bvb.singletons().size()) m_stats.m_singletons++;
-		return rv;
+        bv_bounds bvb(m());
+        const br_status rv = bvb.rewrite(m_bv_ineq_consistency_test_max, f, num, args, result);
+        if (rv != BR_FAILED && (m_m.is_false(result) || m_m.is_true(result))) m_stats.m_unsats++;
+        else if (rv != BR_FAILED && bvb.singletons().size()) m_stats.m_singletons++;
+        else if (rv != BR_FAILED && is_app(result) && to_app(result)->get_num_args() < num) m_stats.m_reduces++;
+        return rv;
     }
 
     bool max_steps_exceeded(unsigned long long num_steps) const {
@@ -90,11 +92,13 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     void reset_statistics() {
         m_stats.m_unsats = 0;
         m_stats.m_singletons = 0;
+        m_stats.m_reduces = 0;
     }
 
     void collect_statistics(statistics & st) const {
         st.update("unsat bv bounds", m_stats.m_unsats);
         st.update("bv singletons", m_stats.m_singletons);
+        st.update("bv reduces", m_stats.m_reduces);
     }
 };
 

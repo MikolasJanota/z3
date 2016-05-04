@@ -314,7 +314,6 @@ br_status bv_rewriter::rw_leq_overflow(bool is_signed, expr * a, expr * b, expr_
         return BR_DONE;
     }
     if (a0_val < b0_val) {
-        const numeral ac0_val = rational::power_of_two(sz) - a0_val;
         result = m_util.mk_ule(m_util.mk_numeral(b0_val - a0_val, sz), b);
         return BR_REWRITE2;
     }
@@ -378,7 +377,7 @@ br_status bv_rewriter::rw_leq_concats(bool is_signed, expr * _a, expr * _b, expr
                 new_b = concat(numb - 1, b->get_args() + 1);
             }
             result = m_util.mk_ule(new_a, new_b);
-            return BR_REWRITE2;
+            return BR_REWRITE2;            
         }
     }
 
