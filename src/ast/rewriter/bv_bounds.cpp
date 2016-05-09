@@ -17,9 +17,6 @@
 #include"bv_bounds.h"
 #include"ast_smt2_pp.h"
 
-#define __PL                 std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
-#define __TPL                TRACE("bv_bounds",  tout << __FILE__ << ":" << __LINE__ << std::endl;);
-
 bv_bounds::~bv_bounds() {
     reset();
 }
@@ -328,9 +325,8 @@ br_status bv_bounds::rewrite(unsigned limit, func_decl * f, unsigned num, expr *
     switch (nargs.size()) {
         case 0: result = negated ? m_m.mk_false() : m_m.mk_true(); return BR_DONE;
         case 1: result = nargs.get(0); return BR_DONE;
-        default: result = negated ?
-                 m_m.mk_or(nargs.size(), nargs.c_ptr())
-                     : m_m.mk_and(nargs.size(), nargs.c_ptr());
+        default: result = negated ? m_m.mk_or(nargs.size(), nargs.c_ptr())
+                                  : m_m.mk_and(nargs.size(), nargs.c_ptr());
                  return BR_DONE;
     }
 }
