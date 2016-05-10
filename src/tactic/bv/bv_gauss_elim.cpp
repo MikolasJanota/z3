@@ -89,40 +89,34 @@ void bv_gauss_elim::add_row(expr * e) {
     row r;
     r.coefs = alloc(coef_map);
     r.original_bit_width = m_util.get_bv_size(lhs);
+    r.bit_width = m_util.get_bv_size(lhs);
     r.coef = numeral::zero();
     add_side(lhs, true, r);
     add_side(rhs, false, r);
-    numeral tmp;
-    unsigned min_rank = r.original_bit_width;
-    coef_map::iterator end = r.coefs->end();
-    for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
-        numeral c = i->get_value();
-        if (c.is_zero()) continue;
-        min_rank = std::min(min_rank, get_rank(c));
-        if (min_rank == 0) break;
-    }
-    if (min_rank > 0) {
-        numeral divisor = numeral::power_of_two(min_rank);
-        for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
-            i->m_value = i->get_value() / divisor;
-        }
-        if (!r.coef.is_zero() && get_rank(r.coef) < min_rank) m_is_consistent = false;
-        r.coef = r.coef / divisor;
-    }
-    r.bit_width = r.original_bit_width - min_rank;
-    m_is_consistent = m_is_consistent && (r.coefs->size() || r.coef == numeral::zero());
-    if (!m_is_consistent) {
-        dealloc(r.coefs);
-    } else {
-        m_rows.push_back(r);
-    }
+    normalize_row(r);
+    m_rows.push_back(r);
+    TRACE("bv_gauss_elim", prn_row(tout << "add_row: ", r) << std::endl;);
 }
 
 void bv_gauss_elim::mak_echelon() {
-  std::sort(m_rows.begin(), m_rows.end(), row_cmp);
-  for (unsigned row_index = 0; row_index < m_rows.size(); ++row_index)  {
-      TRACE("bv_gauss_elim", tout << "pivot row " << row_index << std::endl;);
-      TRACE("bv_gauss_elim", prn_row(tout, m_rows[row_index]) << std::endl;);
+  vector<bool> processed(m_rows.size(), false);
+  expr_sparse_mark marked;
+  while (m_is_consistent) {
+      unsigned max_bw = 0;
+      bool found_pivot = false;
+      unsigned row_index = m_rows.size();
+      for (unsigned i = 0; i < m_rows.size(); ++i)  {
+          if (processed[i]) continue;
+          const row& r = m_rows[i];
+          if (r.coefs->empty()) continue;
+          if (r.bit_width > max_bw) {
+              row_index = i;
+              max_bw = r.bit_width;
+          }
+      }
+      if (row_index == m_rows.size()) break;
+      TRACE("bv_gauss_elim", prn_row(tout << "pivot row ", m_rows[row_index]) << std::endl;);
+      processed[row_index] = true;
       row& r = m_rows[row_index];
       coef_map::iterator end = r.coefs->end();
       app_ref pivot_var(NULL, m_m);
@@ -133,15 +127,7 @@ void bv_gauss_elim::mak_echelon() {
           pivot_var = i->m_key;
           break;
       }
-
-      if (pivot_var.get() == NULL) {
-          if (!r.coef.is_zero()) {
-              m_is_consistent = false;
-              break;
-          } else {
-              continue;
-          }
-      }
+      SASSERT(pivot_var.get() != NULL);
 
       TRACE("bv_gauss_elim", tout << "pivot " << pivot_coef << " " << mk_pp(pivot_var, m_m) << std::endl;);
 
@@ -149,12 +135,12 @@ void bv_gauss_elim::mak_echelon() {
       const bool chk = m_util.mult_inverse(pivot_coef, r.bit_width, inv);
       SASSERT(chk);
       const numeral big_mod = numeral::power_of_two(r.bit_width);
-      for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) i->m_value = mod(i->m_value * inv, big_mod);
+      for (coef_map::iterator i = r.coefs->begin(); end != i; ++i)
+          i->m_value = mod(i->m_value * inv, big_mod);
       r.coef = mod(r.coef * inv, big_mod);
-      TRACE("bv_gauss_elim", tout << "normalize by mul by " << inv << std::endl;);
-      TRACE("bv_gauss_elim", prn_row(tout, m_rows[row_index]) << std::endl;);
-
-      for (unsigned j = row_index + 1; j < m_rows.size(); ++j)  {
+      TRACE("bv_gauss_elim", prn_row(tout << "normalize by mul by " << inv << ": ", r) << std::endl;);
+      for (unsigned j = 0; j < m_rows.size(); ++j)  {
+          if (processed[j]) continue;
           row & r1 = m_rows[j];
           SASSERT(r.bit_width >= r1.bit_width);
           numeral c1;
@@ -165,31 +151,56 @@ void bv_gauss_elim::mak_echelon() {
           coef_map::iterator end1 = r1.coefs->end();
           numeral pval;
           TRACE("bv_gauss_elim", tout << "elim row " << j << " mul " << mul << std::endl;);
+          marked.reset();
           for (coef_map::iterator i = r1.coefs->begin(); end1 != i; ++i) {
                app* const v = i->m_key;
                if (!r.coefs->find(v, pval)) continue;
+               marked.mark(v);
                i->m_value = mod(i->m_value + mul * pval, small_mod);
                TRACE("bv_gauss_elim", tout << "update var " << mk_pp(v, m_m) << " " << i->m_value << std::endl;);
           }
+          for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
+              if (marked.is_marked(i->m_key)) continue;
+              const numeral& nv = mod(i->m_value * mul, small_mod);
+              r1.coefs->insert(i->m_key, nv);
+          }
           r1.coef = mod(r1.coef + mul * r.coef, small_mod);
           SASSERT(r1.coefs->find(pivot_var).is_zero());
+          normalize_row(r1);
       }
   }
 }
 
-bool bv_gauss_elim::rm_zeros(unsigned  row_index) {
+bool bv_gauss_elim::normalize_row(row& r) {
     ptr_buffer<app> torm;
-    const row& r = m_rows[row_index];
+    numeral tmp;
+    unsigned min_rank = r.bit_width;
     coef_map::iterator end = r.coefs->end();
-    for (coef_map::iterator i = r.coefs->begin(); end != i; ++i)
-        if (i->get_value().is_zero()) torm.push_back(i->m_key);
+    for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
+        numeral c = i->get_value();
+        if (c.is_zero())  {
+            torm.push_back(i->m_key);
+        } else {
+            min_rank = std::min(min_rank, get_rank(c));
+        }
+    }
+    if (min_rank > 0) {
+        numeral divisor = numeral::power_of_two(min_rank);
+        for (coef_map::iterator i = r.coefs->begin(); end != i; ++i)
+            i->m_value = i->get_value() / divisor;
+        if (!r.coef.is_zero() && get_rank(r.coef) < min_rank) {
+            m_is_consistent = false;
+            return false;
+        }
+        r.coef = r.coef / divisor;
+    }
+    r.bit_width -= min_rank;
     for (unsigned i = 0; i < torm.size(); ++i) r.coefs->remove(torm[i]);
-    m_is_consistent = m_is_consistent && (!r.coefs->empty() || r.coef.is_zero());
+    if (r.coefs->empty() && !r.coef.is_zero()) m_is_consistent = false;
     return m_is_consistent;
 }
 
 void bv_gauss_elim::output(unsigned  row_index, expr_ref& result) {
-    rm_zeros(row_index);
     const row& r = m_rows[row_index];
     if (r.coefs->empty()) {
         result = r.coef.is_zero() ? m_m.mk_true() : m_m.mk_false();
@@ -246,9 +257,10 @@ bool bv_gauss_elim::is_row(expr * e) {
 
 std::ostream& bv_gauss_elim::prn_row(std::ostream& o, const row & r) {
     coef_map::iterator end = r.coefs->end();
+    o << "(";
     for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
         o << "+" << i->get_value() << " " << mk_pp(i->m_key, m_m) << " ";
     }
-    return o << " = " << r.coef << " [" << r.bit_width << "]";
+    return o << " = " << r.coef << " [" << r.bit_width << "])";
 }
 

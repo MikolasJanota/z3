@@ -52,7 +52,7 @@ protected:
     vector<row>   m_rows;
     bool          m_is_consistent;
 
-    bool rm_zeros(unsigned  row_index);
+    bool normalize_row(row& r);
     unsigned get_rank(numeral n);
     bool is_term(expr * e);
     bool is_sum(expr * e);
