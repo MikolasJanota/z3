@@ -56,13 +56,45 @@ struct bv_gauss_elim_tactic::imp {
             throw tactic_exception(m_m.limit().get_cancel_msg());
     }
 
-    void operator()(goal & g, model_converter_ref & mc) {
-        if (g.inconsistent())
+    void operator()(goal_ref const &  g, goal_ref_buffer & result, model_converter_ref & mc) {
+        if (g->inconsistent())
             return;
-        TRACE("before_bv_gauss_elim", g.display(tout););
+        TRACE("before_bv_gauss_elim", g->display(tout););
         mc = 0;
-        tactic_report report("bv-gauss-elim", g);
-        TRACE("after_bv_gauss_elim", g.display(tout););
+		ptr_vector<expr> flas;
+		g->get_formulas(flas);
+		ast_manager& m = g->m();
+		vector<bool> used;
+		bv_gauss_elim ge(m);
+        for (unsigned i = 0; i < flas.size(); ++i) {
+			const bool ir = ge.is_row(flas[i]);
+			used.push_back(ir);
+			if (!ir) continue;
+			ge.add_row(flas[i]);
+        }
+		ge.mak_echelon();
+
+		goal_ref resg(alloc(goal, *g, true));
+        if (!ge.is_consistent()) {
+			resg->assert_expr(m.mk_false());
+        } else {
+			expr_ref tmp(m);
+            for (unsigned i = 0; i < flas.size(); ++i) {
+				if (!used[i]) {
+					resg->assert_expr(flas[i]);
+					continue;
+				}
+				ge.output(i, tmp);
+				if (m.is_true(tmp)) continue;
+				resg->assert_expr(tmp);
+            }
+        }
+
+		resg->inc_depth();
+		SASSERT(resg->is_well_sorted());
+		result.push_back(resg.get());
+		tactic_report report("bv-gauss-elim", *resg);
+        TRACE("after_bv_gauss_elim", resg->display(tout););
     }
 
 };
@@ -84,10 +116,7 @@ void bv_gauss_elim_tactic::operator()(goal_ref const & g,
     fail_if_proof_generation("bv-gauss-elim", g);
     fail_if_unsat_core_generation("bv-gauss-elim", g);
     mc = 0; pc = 0; core = 0; result.reset();
-    m_imp->operator()(*(g.get()), mc);
-    g->inc_depth();
-    result.push_back(g.get());
-    SASSERT(g->is_well_sorted());
+    m_imp->operator()(g, result, mc);
 }
 
 void bv_gauss_elim_tactic::cleanup() {
