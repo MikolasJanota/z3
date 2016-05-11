@@ -61,6 +61,15 @@ protected:
     void add_side(expr* e, bool lhs, row& r);
     void add_term(bool lhs, const numeral& coef, const numeral& modulus, app_ref& v, row& r);
 
+    inline app_ref output_var(app * v, unsigned original_bit_width, unsigned bit_width);
+
     std::ostream& prn_row(std::ostream& o, const row & r);
 };
+
+inline app_ref bv_gauss_elim::output_var(app * v, unsigned original_bit_width, unsigned bit_width) {
+    SASSERT(m_util.get_bv_size(v) == original_bit_width);
+    SASSERT(bit_width <= original_bit_width);
+    const bool changed = original_bit_width != bit_width;
+    return app_ref(changed ? m_util.mk_extract(bit_width - 1, 0, v) : v, m_m);
+}
 #endif /* BV_GAUSS_ELIM_H_ */

@@ -200,24 +200,43 @@ bool bv_gauss_elim::normalize_row(row& r) {
     return m_is_consistent;
 }
 
+
 void bv_gauss_elim::output(unsigned  row_index, expr_ref& result) {
     const row& r = m_rows[row_index];
+    TRACE("bv_gauss_elim", prn_row(tout << "output: ", r) << std::endl;);
     if (r.coefs->empty()) {
         result = r.coef.is_zero() ? m_m.mk_true() : m_m.mk_false();
         return;
     }
     expr_ref_buffer s(m_m);
     coef_map::iterator end = r.coefs->end();
+    app_ref def(NULL, m_m);
+    app_ref v(NULL, m_m);
+    app_ref num(NULL, m_m);
+    const numeral row_mod = numeral::power_of_two(r.bit_width);
+    if (!r.coef.is_zero()) s.push_back(m_util.mk_numeral(r.coef, r.bit_width));
     for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
         const numeral c = i->get_value();
-        SASSERT(!c.is_zero());
-        const bool iso = c == numeral::one();
-        expr * const n = iso ? NULL : m_util.mk_numeral(c, r.bit_width);
-        expr * const v = r.original_bit_width == r.bit_width ? i->m_key : m_util.mk_extract(r.bit_width - 1, 0, i->m_key);
-        s.push_back(iso ? v : m_util.mk_bv_mul(n, v));
+        SASSERT(c.is_pos() && c < row_mod);
+        const bool is_def = def.get() == NULL && c == numeral::one();
+        if (is_def) {
+            def = output_var(i->m_key, r.original_bit_width, r.bit_width);
+        } else {
+            const numeral nc = row_mod - c;
+            const bool niso = nc == numeral::one();
+            num = niso ? NULL : m_util.mk_numeral(nc, r.bit_width);
+            v = output_var(i->m_key, r.original_bit_width, r.bit_width);
+            s.push_back(niso ? v : m_util.mk_bv_mul(num, v));
+        }
     }
-    expr * const lhs = s.size() == 1 ? s[0] : m_m.mk_app(m_util.get_fid(), OP_BADD, s.size(), s.c_ptr());
-    result = m_m.mk_eq(lhs, m_util.mk_numeral(r.coef, r.bit_width));
+    SASSERT(def.get());
+    if (s.empty()) s.push_back(m_util.mk_numeral(numeral::zero(), r.bit_width));
+    expr_ref rhs(m_m), lhs(m_m);
+    rhs = s.size() == 1 ? s[0] : m_m.mk_app(m_util.get_fid(), OP_BADD, s.size(), s.c_ptr());
+    lhs = def.get() == NULL ? m_util.mk_numeral(numeral::zero(), r.bit_width) : def;
+    TRACE("bv_gauss_elim", tout << "lhs: " << mk_pp(lhs.get(), m_m) << std::endl;);
+    TRACE("bv_gauss_elim", tout << "rhs: " << mk_pp(rhs.get(), m_m) << std::endl;);
+    result = m_m.mk_eq(lhs, rhs);
 }
 
 unsigned bv_gauss_elim::get_rank(numeral n) {
