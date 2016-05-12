@@ -32,6 +32,7 @@ Notes:
 #include"bv_ternary_tactic.h"
 #include"bv_bound_chk_tactic.h"
 #include"ackermannize_bv_tactic.h"
+#include"bv_gauss_elim_tactic.h"
 
 #define MEMLIMIT 300
 
@@ -62,6 +63,7 @@ tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p) {
             if_no_proofs(if_no_unsat_cores(mk_bv_bound_chk_tactic(m))),
             mk_elim_uncnstr_tactic(m),
             if_no_proofs(if_no_unsat_cores(mk_bv_ternary_tactic(m))),
+            if_no_proofs(if_no_unsat_cores(mk_bv_gauss_elim_tactic(m, p))),
             if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
             using_params(mk_simplify_tactic(m), simp2_p),
             //
