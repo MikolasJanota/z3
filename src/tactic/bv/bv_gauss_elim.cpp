@@ -117,11 +117,17 @@ void bv_gauss_elim::elim_defs() {
         coef_map::iterator pos = r.coefs->begin();
         if (pos->m_value != numeral::one()) continue;
         app * const def = pos->m_key;
+        TRACE("bv_gauss_elim", prn_row(tout << "def: ", r) << std::endl;);
         for (unsigned j = 0; j < m_rows.size(); ++j)  {
             if (j == row_index) continue;
             row& r1 = m_rows[j];
             if (r1.bit_width > r.bit_width) continue;
-            if (elim_var(r, r1, def) && r.coefs->size() == 1) todo.push_back(j);
+            TRACE("bv_gauss_elim", prn_row(tout << "backward subst before: ", r1) << std::endl;);
+            const bool change = elim_var(r, r1, def);
+            TRACE("bv_gauss_elim", prn_row(tout << "backward subst: ", r1) << std::endl;);
+            if (change && r1.coefs->size() == 1) {
+                todo.push_back(j);
+            }
             if (!m_is_consistent) return;
         }
     }
