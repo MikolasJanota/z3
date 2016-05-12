@@ -72,7 +72,7 @@ struct bv_gauss_elim_tactic::imp {
 			if (!ir) continue;
 			ge.add_row(flas[i]);
         }
-		ge.mak_echelon();
+		ge.elim();
 
 		goal_ref resg(alloc(goal, *g, true));
         if (!ge.is_consistent()) {

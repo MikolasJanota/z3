@@ -98,9 +98,63 @@ void bv_gauss_elim::add_row(expr * e) {
     TRACE("bv_gauss_elim", prn_row(tout << "add_row: ", r) << std::endl;);
 }
 
-void bv_gauss_elim::mak_echelon() {
+void bv_gauss_elim::elim() {
+    make_echelon();
+    elim_defs();
+}
+
+void bv_gauss_elim::elim_defs() {
+    vector<unsigned> todo;
+    for (unsigned i = 0; i < m_rows.size(); ++i)  {
+        if (m_rows[i].coefs->size() == 1) todo.push_back(i);
+    }
+
+    while (todo.size()) {
+        const unsigned row_index= todo.back();
+        const row& r = m_rows[row_index];
+        todo.pop_back();
+        SASSERT(r.coefs->size() == 1);
+        coef_map::iterator pos = r.coefs->begin();
+        if (pos->m_value != numeral::one()) continue;
+        app * const def = pos->m_key;
+        for (unsigned j = 0; j < m_rows.size(); ++j)  {
+            if (j == row_index) continue;
+            row& r1 = m_rows[j];
+            if (r1.bit_width > r.bit_width) continue;
+            if (elim_var(r, r1, def) && r.coefs->size() == 1) todo.push_back(j);
+            if (!m_is_consistent) return;
+        }
+    }
+}
+
+bool bv_gauss_elim::elim_var(const row& r, row& r1, app* pivot_var) {
+    SASSERT(r.bit_width >= r1.bit_width);
+    SASSERT(r.coefs->find(pivot_var) == numeral::one());
+    numeral c1;
+    if (!r1.coefs->find(pivot_var, c1)) return false;
+    const numeral small_mod = numeral::power_of_two(r1.bit_width);
+    SASSERT(c1 < small_mod);
+    const numeral mul = small_mod - c1;
+    const coef_map::iterator end = r.coefs->end();
+    for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
+        app* const v = i->m_key;
+        coef_map::iterator j = r1.coefs->find_iterator(v);
+        if (j == r1.coefs->end()) {
+            const numeral new_val = mod(i->m_value * mul, small_mod);
+            r1.coefs->insert(i->m_key, new_val);
+        } else {
+            const numeral new_val = mod(i->m_value * mul + j->m_value, small_mod);
+            j->m_value = new_val;
+        }
+    }
+    r1.coef = mod(r1.coef + mul * r.coef, small_mod);
+    SASSERT(r1.coefs->find(pivot_var).is_zero());
+    normalize_row(r1);
+    return true;
+}
+
+void bv_gauss_elim::make_echelon() {
   vector<bool> processed(m_rows.size(), false);
-  expr_sparse_mark marked;
   while (m_is_consistent) {
       unsigned max_bw = 0;
       bool found_pivot = false;
@@ -142,31 +196,8 @@ void bv_gauss_elim::mak_echelon() {
       for (unsigned j = 0; j < m_rows.size(); ++j)  {
           if (processed[j]) continue;
           row & r1 = m_rows[j];
-          SASSERT(r.bit_width >= r1.bit_width);
-          numeral c1;
-          if (!r1.coefs->find(pivot_var, c1)) continue;
-          const numeral small_mod = numeral::power_of_two(r1.bit_width);
-          SASSERT(c1 < small_mod);
-          const numeral mul = small_mod - c1;
-          coef_map::iterator end1 = r1.coefs->end();
-          numeral pval;
-          TRACE("bv_gauss_elim", tout << "elim row " << j << " mul " << mul << std::endl;);
-          marked.reset();
-          for (coef_map::iterator i = r1.coefs->begin(); end1 != i; ++i) {
-               app* const v = i->m_key;
-               if (!r.coefs->find(v, pval)) continue;
-               marked.mark(v);
-               i->m_value = mod(i->m_value + mul * pval, small_mod);
-               TRACE("bv_gauss_elim", tout << "update var " << mk_pp(v, m_m) << " " << i->m_value << std::endl;);
-          }
-          for (coef_map::iterator i = r.coefs->begin(); end != i; ++i) {
-              if (marked.is_marked(i->m_key)) continue;
-              const numeral& nv = mod(i->m_value * mul, small_mod);
-              r1.coefs->insert(i->m_key, nv);
-          }
-          r1.coef = mod(r1.coef + mul * r.coef, small_mod);
-          SASSERT(r1.coefs->find(pivot_var).is_zero());
-          normalize_row(r1);
+          elim_var(r, r1, pivot_var);
+          if (!m_is_consistent) return;
       }
   }
 }
@@ -201,7 +232,7 @@ bool bv_gauss_elim::normalize_row(row& r) {
 }
 
 
-void bv_gauss_elim::output(unsigned  row_index, expr_ref& result) {
+void bv_gauss_elim::output(unsigned row_index, expr_ref& result) {
     const row& r = m_rows[row_index];
     TRACE("bv_gauss_elim", prn_row(tout << "output: ", r) << std::endl;);
     if (r.coefs->empty()) {

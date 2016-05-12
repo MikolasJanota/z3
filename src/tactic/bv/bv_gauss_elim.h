@@ -26,7 +26,7 @@ public:
     virtual ~bv_gauss_elim();
     bool is_row(expr * e);
     void add_row(expr * e);
-    void mak_echelon();
+    void elim();
     bool is_consistent () {return m_is_consistent;}
     unsigned row_count() { return m_rows.size(); }
     void output(unsigned  row_index, expr_ref& result);
@@ -60,6 +60,10 @@ protected:
     bool is_term(expr * e, numeral& coef, app_ref& v);
     void add_side(expr* e, bool lhs, row& r);
     void add_term(bool lhs, const numeral& coef, const numeral& modulus, app_ref& v, row& r);
+
+    void elim_defs();
+    bool elim_var(const row& r, row& r1, app* pivot_var);
+    void make_echelon();
 
     inline app_ref output_var(app * v, unsigned original_bit_width, unsigned bit_width);
 
