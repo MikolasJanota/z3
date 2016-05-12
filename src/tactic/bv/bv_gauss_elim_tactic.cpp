@@ -79,12 +79,15 @@ struct bv_gauss_elim_tactic::imp {
 			resg->assert_expr(m.mk_false());
         } else {
 			expr_ref tmp(m);
+            unsigned row_idx = 0;
             for (unsigned i = 0; i < flas.size(); ++i) {
 				if (!used[i]) {
 					resg->assert_expr(flas[i]);
 					continue;
 				}
-				ge.output(i, tmp);
+                SASSERT(row_idx < ge.row_count());
+				ge.output(row_idx, tmp);
+                ++row_idx;
 				if (m.is_true(tmp)) continue;
 				resg->assert_expr(tmp);
             }
