@@ -94,15 +94,18 @@ struct bv_gauss_elim_tactic::imp {
         if (!ge.is_consistent()) {
             resg->assert_expr(m.mk_false());
         } else {
-            expr_ref tmp(m);
+			expr_ref tmp(m);
+            unsigned row_idx = 0;
             for (unsigned i = 0; i < flas.size(); ++i) {
-                if (!used[i]) {
-                    resg->assert_expr(flas[i]);
-                    continue;
-                }
-                ge.output(i, tmp);
-                if (m.is_true(tmp)) continue;
-                resg->assert_expr(tmp);
+				if (!used[i]) {
+					resg->assert_expr(flas[i]);
+					continue;
+				}
+                SASSERT(row_idx < ge.row_count());
+				ge.output(row_idx, tmp);
+                ++row_idx;
+				if (m.is_true(tmp)) continue;
+				resg->assert_expr(tmp);
             }
         }
 
@@ -146,7 +149,6 @@ void bv_gauss_elim_tactic::operator()(goal_ref const & g,
 void bv_gauss_elim_tactic::collect_statistics(statistics & st) const {
     m_st.collect_statistics(st);
 }
-
 
 void bv_gauss_elim_tactic::cleanup() {
     imp * d = alloc(imp, m_imp->m_m, m_st);
