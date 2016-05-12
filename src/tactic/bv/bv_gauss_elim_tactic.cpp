@@ -19,9 +19,19 @@
 #include"bv_decl_plugin.h"
 #include"ast_pp.h"
 #include "tactical.h"
+struct bv_gauss_elim_stats {
+    bv_gauss_elim_stats() : m_elims(0) {}
+    void reset() {m_elims = 0;}
+    void collect_statistics(statistics & st) const {        
+        st.update("bv-gauss-elims", m_elims);
+    }
+    unsigned m_elims;
+};
+
 class bv_gauss_elim_tactic : public tactic {
     struct imp;
     imp *      m_imp;
+    bv_gauss_elim_stats m_st;
 public:
     bv_gauss_elim_tactic(ast_manager & m);
 
@@ -36,6 +46,8 @@ public:
     virtual void cleanup();
 
     virtual void collect_statistics(statistics & st) const;
+
+    virtual void reset_statistics() { m_st.reset(); }
 };
 
 tactic * mk_bv_gauss_elim_tactic(ast_manager & m, params_ref const & p) {
@@ -46,11 +58,12 @@ struct bv_gauss_elim_tactic::imp {
     typedef rational numeral;
 
     ast_manager &             m_m;
+    bv_gauss_elim_stats&      m_st;
     bv_util                   m_util;
-    unsigned                  m_elims;
 
-    imp(ast_manager & m):
+    imp(ast_manager & m,  bv_gauss_elim_stats& st):
         m_m(m),
+        m_st(st),
         m_util(m)
         { }
 
@@ -64,22 +77,22 @@ struct bv_gauss_elim_tactic::imp {
             return;
         TRACE("before_bv_gauss_elim", g->display(tout););
         mc = 0;
-		ptr_vector<expr> flas;
-		g->get_formulas(flas);
-		ast_manager& m = g->m();
-		vector<bool> used;
-		bv_gauss_elim ge(m);
+        ptr_vector<expr> flas;
+        g->get_formulas(flas);
+        ast_manager& m = g->m();
+        vector<bool> used;
+        bv_gauss_elim ge(m);
         for (unsigned i = 0; i < flas.size(); ++i) {
-			const bool ir = ge.is_row(flas[i]);
-			used.push_back(ir);
-			if (!ir) continue;
-			ge.add_row(flas[i]);
+            const bool ir = ge.is_row(flas[i]);
+            used.push_back(ir);
+            if (!ir) continue;
+            ge.add_row(flas[i]);
         }
-		ge.elim();
+        ge.elim();
 
-		goal_ref resg(alloc(goal, *g, true));
+        goal_ref resg(alloc(goal, *g, true));
         if (!ge.is_consistent()) {
-			resg->assert_expr(m.mk_false());
+            resg->assert_expr(m.mk_false());
         } else {
 			expr_ref tmp(m);
             unsigned row_idx = 0;
@@ -96,27 +109,25 @@ struct bv_gauss_elim_tactic::imp {
             }
         }
 
-        if (ge.is_consistent()) {
-            m_elims += ge.input_term_count();
+        if (!ge.is_consistent()) {
+            TRACE("bv_gauss_elim", tout << "Falsified" << std::endl;);
+            m_st.m_elims += ge.input_term_count();
         } else {
             SASSERT(ge.input_term_count() >= ge.output_term_count());
-            m_elims += ge.input_term_count() - ge.output_term_count();
+            m_st.m_elims += ge.input_term_count() - ge.output_term_count();
+            TRACE("bv_gauss_elim", tout << "In/out term, elims count: " << ge.input_term_count() << " / " << ge.output_term_count() << ", " << m_st.m_elims << std::endl;);
         }
 
-		resg->inc_depth();
-		SASSERT(resg->is_well_sorted());
-		result.push_back(resg.get());
-		tactic_report report("bv-gauss-elim", *resg);
+        resg->inc_depth();
+        SASSERT(resg->is_well_sorted());
+        result.push_back(resg.get());
+        tactic_report report("bv-gauss-elim", *resg);
         TRACE("after_bv_gauss_elim", resg->display(tout););
-    }
-
-    void collect_statistics(statistics & st) const {
-        st.update("bv-gauss-elims", m_elims);
     }
 };
 
 bv_gauss_elim_tactic::bv_gauss_elim_tactic(ast_manager & m) {
-    m_imp = alloc(imp, m);
+    m_imp = alloc(imp, m, m_st);
 }
 
 bv_gauss_elim_tactic::~bv_gauss_elim_tactic() {
@@ -136,12 +147,11 @@ void bv_gauss_elim_tactic::operator()(goal_ref const & g,
 }
 
 void bv_gauss_elim_tactic::collect_statistics(statistics & st) const {
-    m_imp->collect_statistics(st);
+    m_st.collect_statistics(st);
 }
 
-
 void bv_gauss_elim_tactic::cleanup() {
-    imp * d = alloc(imp, m_imp->m_m);
+    imp * d = alloc(imp, m_imp->m_m, m_st);
     std::swap(d, m_imp);
     dealloc(d);
 }
