@@ -34,6 +34,8 @@ public:
     virtual void operator()(goal_ref const & g, goal_ref_buffer & result, model_converter_ref & mc, proof_converter_ref & pc, expr_dependency_ref & core);
 
     virtual void cleanup();
+
+    virtual void collect_statistics(statistics & st) const;
 };
 
 tactic * mk_bv_gauss_elim_tactic(ast_manager & m, params_ref const & p) {
@@ -45,6 +47,7 @@ struct bv_gauss_elim_tactic::imp {
 
     ast_manager &             m_m;
     bv_util                   m_util;
+    unsigned                  m_elims;
 
     imp(ast_manager & m):
         m_m(m),
@@ -90,6 +93,13 @@ struct bv_gauss_elim_tactic::imp {
             }
         }
 
+        if (ge.is_consistent()) {
+            m_elims += ge.input_term_count();
+        } else {
+            SASSERT(ge.input_term_count() >= ge.output_term_count());
+            m_elims += ge.input_term_count() - ge.output_term_count();
+        }
+
 		resg->inc_depth();
 		SASSERT(resg->is_well_sorted());
 		result.push_back(resg.get());
@@ -97,6 +107,9 @@ struct bv_gauss_elim_tactic::imp {
         TRACE("after_bv_gauss_elim", resg->display(tout););
     }
 
+    void collect_statistics(statistics & st) const {
+        st.update("bv-gauss-elims", m_elims);
+    }
 };
 
 bv_gauss_elim_tactic::bv_gauss_elim_tactic(ast_manager & m) {
@@ -118,6 +131,11 @@ void bv_gauss_elim_tactic::operator()(goal_ref const & g,
     mc = 0; pc = 0; core = 0; result.reset();
     m_imp->operator()(g, result, mc);
 }
+
+void bv_gauss_elim_tactic::collect_statistics(statistics & st) const {
+    m_imp->collect_statistics(st);
+}
+
 
 void bv_gauss_elim_tactic::cleanup() {
     imp * d = alloc(imp, m_imp->m_m);
