@@ -72,6 +72,7 @@ bool bv_gauss_elim::is_sum(expr * e) {
 }
 
 void bv_gauss_elim::add_term(bool lhs, const numeral& coef, const numeral& modulus, app_ref& v, row& r) {
+    m_input_term_count++;
     if (v.get() == NULL) {
         r.coef = mod(lhs ? r.coef - coef : r.coef + coef, modulus);
     }
@@ -271,6 +272,7 @@ void bv_gauss_elim::output(unsigned row_index, expr_ref& result) {
     expr_ref rhs(m_m), lhs(m_m);
     rhs = s.size() == 1 ? s[0] : m_m.mk_app(m_util.get_fid(), OP_BADD, s.size(), s.c_ptr());
     lhs = def.get() == NULL ? m_util.mk_numeral(numeral::zero(), r.bit_width) : def;
+    m_output_term_count += 1 + s.size();
     TRACE("bv_gauss_elim", tout << "lhs: " << mk_pp(lhs.get(), m_m) << std::endl;);
     TRACE("bv_gauss_elim", tout << "rhs: " << mk_pp(rhs.get(), m_m) << std::endl;);
     result = m_m.mk_eq(lhs, rhs);

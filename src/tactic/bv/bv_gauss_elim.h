@@ -20,16 +20,18 @@
 class bv_gauss_elim {
 public:
     bv_gauss_elim(ast_manager& m)
-        : m_m(m), m_util(m), m_is_consistent(true)
+        : m_m(m),m_util(m),m_is_consistent(true),m_input_term_count(0),m_output_term_count(0)
     {}
 
     virtual ~bv_gauss_elim();
     bool is_row(expr * e);
     void add_row(expr * e);
     void elim();
-    bool is_consistent () {return m_is_consistent;}
-    unsigned row_count() { return m_rows.size(); }
+    bool is_consistent () const {return m_is_consistent;}
+    unsigned row_count() const { return m_rows.size(); }
     void output(unsigned  row_index, expr_ref& result);
+    unsigned input_term_count () const {return m_input_term_count;}
+    unsigned output_term_count () const {return m_output_term_count;}
 protected:
     typedef rational numeral;
     typedef obj_map<app, numeral> coef_map;
@@ -51,6 +53,8 @@ protected:
     bv_util       m_util;
     vector<row>   m_rows;
     bool          m_is_consistent;
+    unsigned      m_input_term_count;
+    unsigned      m_output_term_count;
 
     bool normalize_row(row& r);
     unsigned get_rank(numeral n);
