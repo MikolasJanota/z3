@@ -35,11 +35,8 @@ Notes:
 #include"lackr.h"
 #include"ackermannization_params.hpp"
 #include"qfufbv_ackr_model_converter.h"
-<<<<<<< HEAD
 #include"bv_bound_chk_tactic.h"
-=======
 #include"bv_gauss_elim_tactic.h"
->>>>>>> bv-gauss-elim
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
