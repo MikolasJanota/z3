@@ -41,6 +41,7 @@ void bv_rewriter::updt_local_params(params_ref const & _p) {
     m_extract_prop = p.bv_extract_prop();
     m_ite2id = p.bv_ite2id();
     m_le_extra = p.bv_le_extra();
+    set_sort_sums(p.bv_sort_ac());
 }
 
 void bv_rewriter::updt_params(params_ref const & p) {
