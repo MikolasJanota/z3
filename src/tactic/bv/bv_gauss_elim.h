@@ -17,6 +17,7 @@
 #ifndef BV_GAUSS_ELIM_H_
 #define BV_GAUSS_ELIM_H_
 #include"ast.h"
+#include"bv_decl_plugin.h"
 class bv_gauss_elim {
 public:
     bv_gauss_elim(ast_manager& m)

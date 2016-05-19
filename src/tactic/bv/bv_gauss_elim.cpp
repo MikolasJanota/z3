@@ -14,7 +14,6 @@
 
  Revision History:
 --*/
-#include"bv_gauss_elim_tactic.h"
 #include"bv_gauss_elim.h"
 #include"bv_decl_plugin.h"
 #include"ast_pp.h"
