@@ -152,7 +152,7 @@ void lackr::eager_enc() {
 }
 
 
-void lackr::abstract() {
+void lackr::build_abstraction_map() {
     const fun2terms_map::iterator e = m_fun2terms.end();
     for (fun2terms_map::iterator i = m_fun2terms.begin(); i != e; ++i) {
         func_decl* const fd = i->m_key;
@@ -172,6 +172,10 @@ void lackr::abstract() {
         }
     }
     m_info->seal();
+}
+
+void lackr::abstract() {
+    build_abstraction_map();
     // perform abstraction of the formulas
     const unsigned sz = m_formulas.size();
     for (unsigned i = 0; i < sz; ++i) {
@@ -181,9 +185,9 @@ void lackr::abstract() {
     }
 }
 
-void lackr::add_term(app* a) {
-    if (a->get_num_args() == 0) return;
-    if (!m_ackr_helper.should_ackermannize(a)) return;
+bool lackr::add_term(app* a) {
+    if (a->get_num_args() == 0) return false;
+    if (!m_ackr_helper.should_ackermannize(a)) return false;
     func_decl* const fd = a->get_decl();
     app_set* ts = 0;
     if (!m_fun2terms.find(fd, ts)) {
@@ -192,6 +196,7 @@ void lackr::add_term(app* a) {
     }
     TRACE("lackr", tout << "term(" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
     ts->insert(a);
+    return true;
 }
 
 void  lackr::push_abstraction() {
@@ -216,25 +221,31 @@ lbool lackr::eager() {
     return m_sat->check_sat(0, 0);
 }
 
+model_constructor* lackr::mk_model_constructor(ast_manager& m, ackr_info_ref& info) {
+    return alloc(lackr_model_constructor, m, info);
+}
+
 lbool lackr::lazy() {
     SASSERT(m_is_init);
-    lackr_model_constructor mc(m_m, m_info);
+    //lackr_model_constructor mc(m_m, m_info);
+    scoped_ptr<model_constructor> mc = mk_model_constructor(m_m, m_info);
     push_abstraction();
     unsigned ackr_head = 0;
     while (1) {
         m_st.m_it++;
         checkpoint();
         TRACE("lackr", tout << "lazy check: " << m_st.m_it << "\n";);
+        TRACE("lackr", m_sat->display(tout););
         const lbool r = m_sat->check_sat(0, 0);
         if (r == l_undef) return l_undef; // give up
         if (r == l_false) return l_false; // abstraction unsat
         // reconstruct model
         model_ref am;
         m_sat->get_model(am);
-        const bool mc_res = mc.check(am);
+        const bool mc_res = mc->check(am);
         if (mc_res) return l_true; // model okay
         // refine abstraction
-        const lackr_model_constructor::conflict_list conflicts = mc.get_conflicts();
+        const lackr_model_constructor::conflict_list conflicts = mc->get_conflicts();
         for (lackr_model_constructor::conflict_list::const_iterator i = conflicts.begin();
              i != conflicts.end(); ++i) {
             ackr(i->first, i->second);

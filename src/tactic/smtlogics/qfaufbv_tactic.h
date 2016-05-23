@@ -24,9 +24,11 @@ class ast_manager;
 class tactic;
 
 tactic * mk_qfaufbv_tactic(ast_manager & m, params_ref const & p = params_ref());
+tactic * mk_qfaufbv_ackr_tactic(ast_manager & m, params_ref const & p);
 
 /*
   ADD_TACTIC("qfaufbv",  "builtin strategy for solving QF_AUFBV problems.", "mk_qfaufbv_tactic(m, p)")
+  ADD_TACTIC("qfaufbv_ackr", "A tactic for solving QF_AUFBV based on Ackermannization.", "mk_qfaufbv_ackr_tactic(m, p)")
 */
 
 #endif

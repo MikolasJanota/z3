@@ -1,32 +1,31 @@
  /*++
- Copyright (c) 2015 Microsoft Corporation
+ Copyright (c) 2016 Microsoft Corporation
 
  Module Name:
 
-  model_constructor.h
+  lackr_arrays_model_constructor.h
 
  Abstract:
-   Given a propositional abstraction, attempt to construct a model.
 
 
  Author:
 
- Mikolas Janota
+ Mikolas Janota (MikolasJanota)
 
  Revision History:
  --*/
-#ifndef LACKR_MODEL_CONSTRUCTOR_H_
-#define LACKR_MODEL_CONSTRUCTOR_H_
+#ifndef LACKR_ARRAYS_MODEL_CONSTRUCTOR_H_
+#define LACKR_ARRAYS_MODEL_CONSTRUCTOR_H_
 #include"ast.h"
 #include"ackr_info.h"
 #include"ackr_helper.h"
 #include"model.h"
 #include"model_constructor.h"
 
-class lackr_model_constructor : public model_constructor {
+class lackr_arrays_model_constructor : public model_constructor {
     public:
-        lackr_model_constructor(ast_manager& m, ackr_info_ref info);
-        virtual ~lackr_model_constructor();
+        lackr_arrays_model_constructor(ast_manager& m, ackr_info_ref info);
+        virtual ~lackr_arrays_model_constructor();
         virtual bool check(model_ref& abstr_model);
         virtual const conflict_list& get_conflicts() {
             SASSERT(m_state == CONFLICT);
@@ -55,5 +54,5 @@ class lackr_model_constructor : public model_constructor {
         unsigned m_ref_count; // reference counting
 };
 
-typedef ref<lackr_model_constructor> lackr_model_constructor_ref;
-#endif /* MODEL_CONSTRUCTOR_H_ */
+typedef ref<lackr_arrays_model_constructor> lackr_arrays_model_constructor_ref;
+#endif /* LACKR_ARRAYS_MODEL_CONSTRUCTOR_H_ */
