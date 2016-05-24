@@ -98,7 +98,7 @@ class lackr {
 
         bool init();
         lbool eager();
-        lbool lazy();
+        virtual lbool lazy();
 
         //
         // Introduce congruence ackermann lemma for the two given terms.

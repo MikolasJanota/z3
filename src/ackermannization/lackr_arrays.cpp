@@ -87,3 +87,43 @@ void lackr_arrays::build_abstraction_map() {
 model_constructor* lackr_arrays::mk_model_constructor(ast_manager& m, ackr_info_ref& info) {
     return alloc(lackr_arrays_model_constructor, m, info);
 }
+
+lbool lackr_arrays::lazy() {
+    SASSERT(m_is_init);
+    //lackr_model_constructor mc(m_m, m_info);
+    scoped_ptr<lackr_arrays_model_constructor> mc = (lackr_arrays_model_constructor*)mk_model_constructor(m_m, m_info);
+    push_abstraction();
+    unsigned ackr_head = 0;
+    while (1) {
+        m_st.m_it++;
+        checkpoint();
+        TRACE("lackr", tout << "lazy check: " << m_st.m_it << "\n";);
+        TRACE("lackr", m_sat->display(tout););
+        const lbool r = m_sat->check_sat(0, 0);
+        if (r == l_undef) return l_undef; // give up
+        if (r == l_false) return l_false; // abstraction unsat
+        // reconstruct model
+        model_ref am;
+        m_sat->get_model(am);
+        const bool mc_res = mc->check(am);
+        if (mc_res) {
+            TRACE("lackr", tout << "lazy check OK" << std::endl;);
+            return l_true; // model okay
+        }
+        TRACE("lackr", tout << "lazy check confl" << std::endl;);
+        // refine abstraction
+        const lackr_arrays_model_constructor::conflict_list conflicts = mc->get_conflicts();
+        for (lackr_arrays_model_constructor::conflict_list::const_iterator i = conflicts.begin();
+             i != conflicts.end(); ++i) {
+            ackr(i->first, i->second);
+        }
+        while (ackr_head < m_ackrs.size()) {
+            m_sat->assert_expr(m_ackrs.get(ackr_head++));
+        }
+        const lackr_arrays_model_constructor::array_lemma_list lemmas = mc->get_array_lemmas();
+        for (lackr_arrays_model_constructor::array_lemma_list::const_iterator i = lemmas.begin();
+             i != lemmas.end(); ++i) {
+            m_sat->assert_expr(*i);
+        }
+    }
+}

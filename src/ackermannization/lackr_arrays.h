@@ -40,5 +40,6 @@ class lackr_arrays : protected lackr  {
         virtual bool add_term(app* a);
         virtual void build_abstraction_map();
         virtual model_constructor* mk_model_constructor(ast_manager& m, ackr_info_ref& info);
+        virtual lbool lazy();
 };
 #endif /* LACKR_ARRAYS_H_ */

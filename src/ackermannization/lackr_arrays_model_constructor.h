@@ -24,9 +24,16 @@
 
 class lackr_arrays_model_constructor : public model_constructor {
     public:
+        typedef vector<expr*>              array_lemma_list;
         lackr_arrays_model_constructor(ast_manager& m, ackr_info_ref info);
         virtual ~lackr_arrays_model_constructor();
         virtual bool check(model_ref& abstr_model);
+
+        virtual const array_lemma_list& get_array_lemmas() {
+            SASSERT(m_state == CONFLICT);
+            return m_array_lemmas;
+        }
+
         virtual const conflict_list& get_conflicts() {
             SASSERT(m_state == CONFLICT);
             return m_conflicts;
@@ -49,6 +56,7 @@ class lackr_arrays_model_constructor : public model_constructor {
         ast_manager &                      m_m;
         enum {CHECKED, CONFLICT, UNKNOWN}  m_state;
         conflict_list                      m_conflicts;
+        array_lemma_list                   m_array_lemmas;
         const ackr_info_ref                m_info;
 
         unsigned m_ref_count; // reference counting

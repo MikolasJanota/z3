@@ -28,11 +28,14 @@ struct lackr_arrays_model_constructor::imp {
         imp(ast_manager & m,
             ackr_info_ref info,
             model_ref & abstr_model,
-            conflict_list & conflicts)
+            conflict_list & conflicts,
+            array_lemma_list & array_lemmas
+            )
             : m_m(m)
             , m_info(info)
             , m_abstr_model(abstr_model)
             , m_conflicts(conflicts)
+            , m_array_lemmas(array_lemmas)
             , m_b_rw(m)
             , m_bv_rw(m)
             , m_evaluator(NULL)
@@ -141,6 +144,7 @@ struct lackr_arrays_model_constructor::imp {
         ackr_info_ref                   m_info;
         model_ref&                      m_abstr_model;
         conflict_list&                  m_conflicts;
+        array_lemma_list&               m_array_lemmas;
         bool_rewriter                   m_b_rw;
         bv_rewriter                     m_bv_rw;
         model_evaluator *               m_evaluator;
@@ -148,10 +152,13 @@ struct lackr_arrays_model_constructor::imp {
         array_util                      m_ar_util;
     private:
         struct val_info { expr * value; app * source_term; };
+        struct read_info { app* rd; expr * value; expr * reason; };
         typedef obj_map<app, expr *> app2val_t;
+        typedef obj_map<app, read_info> app2read_info_t;
         typedef obj_map<app, val_info> values2val_t;
         values2val_t     m_values2val;
         app2val_t        m_app2val;
+        //app2read_info_t  m_read_infos;
         ptr_vector<expr> m_stack;
         ackr_helper      m_ackr_helper;
         expr_mark        m_visited;
@@ -272,7 +279,7 @@ struct lackr_arrays_model_constructor::imp {
             if (!evaluate(a, result)) return false;
             SASSERT(is_val(result));
             TRACE("model_constructor",
-                tout << "map term(\n" << mk_ismt2_pp(a, m_m, 2) << "\n->"
+                tout << "map term(" << mk_ismt2_pp(a, m_m, 2) << "->"
                 << mk_ismt2_pp(result.get(), m_m, 2)<< ")\n"; );
             CTRACE("model_constructor",
                 !is_val(result.get()),
@@ -340,7 +347,7 @@ struct lackr_arrays_model_constructor::imp {
             return true;
         }
 
-        obj_map<expr, app2val_t*> m_read_vals;
+        obj_map<expr, app2read_info_t*> m_read_vals;
         struct qued_read { expr* dest; app* rd; };
         vector<qued_read> m_qued_reads;
         expr_ref_vector   m_qued_vals;
@@ -367,7 +374,7 @@ struct lackr_arrays_model_constructor::imp {
             dest = m_qued_reads.back().dest;
             rd = m_qued_reads.back().rd;
             val = m_qued_vals.back();
-            reason = m_qued_vals.back();
+            reason = m_qued_reasons.back();
             m_qued_vals.pop_back();
             m_qued_reads.pop_back();
             m_qued_reasons.pop_back();
@@ -375,8 +382,15 @@ struct lackr_arrays_model_constructor::imp {
             SASSERT(m_qued_reads.size() == m_qued_reasons.size());
         }
 
+        expr * get_ix(app* rd) {
+            SASSERT(m_ar_util.is_select(rd));
+            return rd->get_arg(1);
+        }
+
         bool get_ix_val(app* rd, expr*& res) {
-            return eval_cached(rd, res);
+            const bool rv = eval_cached(to_app(get_ix(rd)), res);
+            SASSERT(!rv || is_val(res));
+            return rv;
         }
 
         bool process_read_que() {
@@ -386,36 +400,81 @@ struct lackr_arrays_model_constructor::imp {
             expr_ref reason(m_m);
             while (m_qued_reads.size()) {
                 pop_read(dest, rd, val, reason);
-                TRACE("model_constructor", tout << "processing read" << mk_ismt2_pp(rd, m_m, 2) << std::endl;);
-                app2val_t * const rvs = get_read_vals(dest);
+                TRACE("model_constructor", tout << "processing read " << mk_ismt2_pp(rd, m_m, 2) << " : " << mk_ismt2_pp(dest, m_m, 2) << "," << mk_ismt2_pp(val.get(), m_m, 2) << ",";
+                    if (reason.get()) tout << mk_ismt2_pp(reason.get(), m_m, 2);
+                     else tout << "NULL";
+                     tout << std::endl;);
+                app2read_info_t * const rvs = get_read_vals(dest);
                 expr * ix_val(NULL);
                 if (!get_ix_val(rd, ix_val)) return false;
                 expr* ix_val1(NULL);
-                app2val_t::iterator i = rvs->begin();
-                const app2val_t::iterator e = rvs->end();
+                app2read_info_t::iterator i = rvs->begin();
+                const app2read_info_t::iterator e = rvs->end();
                 bool already_there = false;
                 for (; i != e; ++i) {
-                    expr * const r1 = i->m_key;
-                    expr * const val1 = i->m_value;
-                    const bool chk = get_ix_val(rd, ix_val1);
-                    SASSERT(chk);
+                    app * const ix_val1 = i->m_key;
+                    const read_info& ri1 = i->m_value;
+                    app * const rd1 = ri1.rd;
                     if (m_m.are_distinct(ix_val1, ix_val)) continue;
-                    if (m_m.are_distinct(val1, val)) {
-                        TRACE("model_constructor", tout << "conflict" << std::endl;);
+                    if (m_m.are_distinct(ri1.value, val)) {
+                        TRACE("model_constructor", tout << "array conflict, with " << mk_ismt2_pp(rd1, m_m) << std::endl;);
+                        expr_ref lemma(NULL, m_m);
+                        if (reason.get()) lemma = reason;
+                        CTRACE("model_constructor", lemma.get(), tout << "lemma" << mk_ismt2_pp(lemma, m_m) << std::endl;);
+                        if (ri1.reason) {
+                            lemma = lemma.get() ? m_m.mk_and(lemma, ri1.reason) : ri1.reason;
+                        }
+                        CTRACE("model_constructor", lemma.get(), tout << "lemma" << mk_ismt2_pp(lemma, m_m) << std::endl;);
+                        expr_ref rhs(m_m), rd1_a(m_m), rd_a(m_m), ix_a(m_m), ix1_a(m_m), lhs(m_m);
+                        m_info->abstract(rd1, rd1_a);
+                        m_info->abstract(rd, rd_a);
+                        m_info->abstract(get_ix(rd), ix_a);
+                        m_info->abstract(get_ix(rd1), ix1_a);
+                        lhs = m_m.mk_eq(ix_a, ix1_a);
+                        rhs = m_m.mk_eq(rd_a, rd1_a);
+                        if (lemma.get()) lhs = m_m.mk_and(lemma.get(), lhs);
+                        lemma = m_m.mk_implies(lhs, rhs);
+                        m_array_lemmas.push_back(lemma);
+                        TRACE("model_constructor", tout << "array conflict, with lemma" <<
+                               mk_ismt2_pp(lemma, m_m) << std::endl;);
                         return false;
                     }
                     already_there = true;
                 }
-                if (!already_there) rvs->insert(to_app(ix_val), val);
+                if (!already_there) {
+                    read_info ri;
+                    ri.reason = reason.get();
+                    ri.value = val.get();
+                    ri.rd = rd;
+                    rvs->insert(to_app(ix_val), ri);
+                }
+                propagate_read(dest, rd, ix_val, val, reason);
             }
             return true;
         }
 
-        app2val_t* get_read_vals(expr* a) {
-            obj_map<expr, app2val_t*>::iterator i = m_read_vals.find_iterator(a);
-            app2val_t *retv(NULL);
+        void propagate_read(expr*& dest, app *& rd, expr* ix_val, expr_ref& val, expr_ref& reason) {
+            if (m_ar_util.is_store(dest)) {
+                app* const w_ix = to_app(to_app(dest)->get_arg(1));
+                expr* w_ix_val(NULL);
+                const bool chk = eval_cached(w_ix, w_ix_val);
+                SASSERT(chk);
+                if (m_m.are_distinct(w_ix_val, ix_val)) {
+                    expr_ref new_reason(m_m), r_ix_a(m_m), w_ix_a(m_m);
+                    m_info->abstract(rd->get_arg(1), r_ix_a);
+                    m_info->abstract(w_ix, w_ix_a);
+                    new_reason = m_m.mk_not(m_m.mk_eq(r_ix_a, w_ix_a));
+                    if (reason.get()) new_reason = m_m.mk_and(reason, new_reason);
+                    que_read(to_app(dest)->get_arg(0), rd, val, new_reason);
+                }
+            }
+        }
+
+        app2read_info_t* get_read_vals(expr* a) {
+            obj_map<expr, app2read_info_t *>::iterator i = m_read_vals.find_iterator(a);
+            app2read_info_t *retv(NULL);
             if (i == m_read_vals.end()) {
-                retv = alloc(app2val_t);
+                retv = alloc(app2read_info_t);
                 m_read_vals.insert(a, retv);
             }  else{
                 retv = i->get_value();
@@ -474,7 +533,7 @@ bool lackr_arrays_model_constructor::check(model_ref& abstr_model) {
         dealloc(m_imp);
         m_imp = 0;
     }
-    m_imp = alloc(lackr_arrays_model_constructor::imp, m_m, m_info, abstr_model, m_conflicts);
+    m_imp = alloc(lackr_arrays_model_constructor::imp, m_m, m_info, abstr_model, m_conflicts, m_array_lemmas);
     const bool rv = m_imp->check();
     m_state = rv ? CHECKED : CONFLICT;
     return rv;
