@@ -120,9 +120,8 @@ lbool lackr_arrays::lazy() {
         while (ackr_head < m_ackrs.size()) {
             m_sat->assert_expr(m_ackrs.get(ackr_head++));
         }
-        const lackr_arrays_model_constructor::array_lemma_list lemmas = mc->get_array_lemmas();
-        for (lackr_arrays_model_constructor::array_lemma_list::const_iterator i = lemmas.begin();
-             i != lemmas.end(); ++i) {
+        const expr_ref_vector& lemmas = mc->get_array_lemmas();
+        for (expr_ref_vector::iterator i = lemmas.begin(); i != lemmas.end(); ++i) {
             m_sat->assert_expr(*i);
         }
     }
