@@ -28,6 +28,7 @@
 #include"util.h"
 #include"tactic_exception.h"
 #include"goal.h"
+#include"model_constructor.h"
 
 struct lackr_stats {
     lackr_stats() : m_it(0), m_ackrs_sz(0) {}
@@ -44,13 +45,13 @@ class lackr {
     public:
         lackr(ast_manager& m, params_ref p, lackr_stats& st,
             expr_ref_vector& formulas, solver * uffree_solver);
-        ~lackr();
-        void updt_params(params_ref const & _p);
+        virtual ~lackr();
+        virtual void updt_params(params_ref const & _p);
 
         /** \brief
          * Solve the formula that the class was initialized with.
          **/
-        lbool operator() ();
+        virtual lbool operator() ();
 
 
         /** \brief
@@ -77,7 +78,7 @@ class lackr {
             }
             cooperate("lackr");
         }
-    private:
+    protected:
         typedef ackr_helper::fun2terms_map fun2terms_map;
         typedef ackr_helper::app_set       app_set;
         ast_manager&                         m_m;
@@ -97,7 +98,7 @@ class lackr {
 
         bool init();
         lbool eager();
-        lbool lazy();
+        virtual lbool lazy();
 
         //
         // Introduce congruence ackermann lemma for the two given terms.
@@ -109,15 +110,19 @@ class lackr {
         //
         void eager_enc();
 
+        virtual void build_abstraction_map();
+
         void abstract();
 
         void push_abstraction();
 
-        void add_term(app* a);
+        virtual bool add_term(app* a);
 
         //
         // Collect all uninterpreted terms, skipping 0-arity.
         //
         bool collect_terms();
+
+        virtual model_constructor* mk_model_constructor(ast_manager& m, ackr_info_ref& info);
 };
 #endif /* LACKR_H_ */
