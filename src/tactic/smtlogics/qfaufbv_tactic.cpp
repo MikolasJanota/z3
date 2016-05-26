@@ -31,7 +31,6 @@ Notes:
 #include"cooperate.h"
 #include"lackr_arrays.h"
 #include"ackermannization_params.hpp"
-#include"qfufbv_ackr_arrays_model_converter.h"
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
