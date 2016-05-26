@@ -21,6 +21,7 @@ lackr_arrays::lackr_arrays(ast_manager& m, params_ref p, lackr_stats& st,
             expr_ref_vector& formulas, solver * uffree_solver)
 : lackr(m, p, st, formulas, uffree_solver)
 , m_ar_util(m)
+, m_mc(NULL)
 {
     updt_params(p);
 }
@@ -90,8 +91,8 @@ model_constructor* lackr_arrays::mk_model_constructor(ast_manager& m, ackr_info_
 
 lbool lackr_arrays::lazy() {
     SASSERT(m_is_init);
-    //lackr_model_constructor mc(m_m, m_info);
-    scoped_ptr<lackr_arrays_model_constructor> mc = (lackr_arrays_model_constructor*)mk_model_constructor(m_m, m_info);
+    if (m_mc) dealloc(m_mc);
+    m_mc = static_cast<lackr_arrays_model_constructor*>(mk_model_constructor(m_m, m_info));
     push_abstraction();
     unsigned ackr_head = 0;
     while (1) {
@@ -105,14 +106,14 @@ lbool lackr_arrays::lazy() {
         // reconstruct model
         model_ref am;
         m_sat->get_model(am);
-        const bool mc_res = mc->check(am);
+        const bool mc_res = m_mc->check(am);
         if (mc_res) {
             TRACE("lackr", tout << "lazy check OK" << std::endl;);
             return l_true; // model okay
         }
         TRACE("lackr", tout << "lazy check confl" << std::endl;);
         // refine abstraction
-        const lackr_arrays_model_constructor::conflict_list conflicts = mc->get_conflicts();
+        const lackr_arrays_model_constructor::conflict_list conflicts = m_mc->get_conflicts();
         for (lackr_arrays_model_constructor::conflict_list::const_iterator i = conflicts.begin();
              i != conflicts.end(); ++i) {
             ackr(i->first, i->second);
@@ -120,9 +121,14 @@ lbool lackr_arrays::lazy() {
         while (ackr_head < m_ackrs.size()) {
             m_sat->assert_expr(m_ackrs.get(ackr_head++));
         }
-        const expr_ref_vector& lemmas = mc->get_array_lemmas();
+        const expr_ref_vector& lemmas = m_mc->get_array_lemmas();
         for (expr_ref_vector::iterator i = lemmas.begin(); i != lemmas.end(); ++i) {
             m_sat->assert_expr(*i);
         }
     }
+}
+
+
+void lackr_arrays::make_model(model_ref& m) {
+    m_mc->make_model(m);
 }

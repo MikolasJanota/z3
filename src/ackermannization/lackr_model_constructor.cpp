@@ -134,7 +134,7 @@ struct lackr_model_constructor::imp {
     private:
         ast_manager&                    m_m;
         ackr_info_ref                   m_info;
-        model_ref&                      m_abstr_model;
+        model_ref                       m_abstr_model;
         conflict_list&                  m_conflicts;
         bool_rewriter                   m_b_rw;
         bv_rewriter                     m_bv_rw;
@@ -325,7 +325,7 @@ struct lackr_model_constructor::imp {
             UNREACHABLE();
             return true;
         }
-    
+
         void make_value_interpreted_function(app* a,
                 expr_ref_vector& values,
                 expr_ref& result) {

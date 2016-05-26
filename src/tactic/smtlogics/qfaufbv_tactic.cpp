@@ -31,7 +31,7 @@ Notes:
 #include"cooperate.h"
 #include"lackr_arrays.h"
 #include"ackermannization_params.hpp"
-#include"qfufbv_ackr_model_converter.h"
+#include"qfufbv_ackr_arrays_model_converter.h"
 ///////////////
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
@@ -77,8 +77,9 @@ public:
         if (o != l_undef) result.push_back(resg.get());
         // report model
         if (g->models_enabled() && (o == l_true)) {
-            model_ref abstr_model = imp->get_model();
-            mc = mk_qfufbv_ackr_model_converter(m, imp->get_info(), abstr_model);
+            model_ref new_model = alloc(model, m);
+            imp->make_model(new_model);
+            mc = model2model_converter(new_model.get());
         }
     }
 
