@@ -24,6 +24,8 @@
 #include"bv_size_reduction_tactic.h"
 #include"reduce_args_tactic.h"
 #include"simplify_tactic.h"
+#include"ackr_helper.h"
+
 
 
 class stats_tactic : public tactic {
@@ -32,6 +34,7 @@ public:
         : m_m(m)
         , m_p(p)
         , m_bv_util(m)
+        , m_ackr_helper(m)
     {
         reset_stats();
     }
@@ -67,8 +70,10 @@ protected:
     ast_manager&                         m_m;
     params_ref                           m_p;
     bv_util                              m_bv_util;
+    ackr_helper                          m_ackr_helper;
     unsigned                             m_non_bin_bvmul;
     unsigned                             m_rem_div_by_const;
+    unsigned                             m_count_ufs;
     unsigned m_count_BV_NUM;
     unsigned m_count_BADD;
     unsigned m_count_BMUL;
@@ -113,6 +118,8 @@ protected:
     void reset_stats() {
         m_non_bin_bvmul = 0;
         m_rem_div_by_const = 0;
+        m_count_ufs = 0;
+
         m_count_BV_NUM = 0;
         m_count_BADD = 0;
         m_count_BMUL = 0;
@@ -158,6 +165,7 @@ protected:
     void collect_stats(statistics & st) const {
         st.update("non_bin_bvmul", m_non_bin_bvmul);
         st.update("rem_div_by_const", m_rem_div_by_const);
+        st.update("UFs", m_count_ufs);
 
         st.update("BV_NUM", m_count_BV_NUM);
         st.update("BADD", m_count_BADD);
@@ -221,7 +229,7 @@ protected:
 
     void visit_var(var * v) { }
 
-    void count(app * a) {
+    void count_bv(app * a) {
         if (a->get_family_id() != m_bv_util.get_fid()) return;
         switch (a->get_decl_kind())
         {
@@ -272,7 +280,11 @@ protected:
     void visit_app(app * a) {
         if (m_bv_util.is_bv_mul(a) && a->get_num_args() > 2) ++m_non_bin_bvmul;
         if (a->get_num_args() == 2 && is_rem_div(a) && m_bv_util.is_numeral(a->get_arg(1))) m_rem_div_by_const++;
-        count(a);
+        if (a->get_num_args() && m_ackr_helper.should_ackermannize(a)) {
+            TRACE("stats_tactic", tout << "UF:" << mk_ismt2_pp(a->get_decl(), m_m) << std::endl;);
+            ++m_count_ufs;
+        }
+        count_bv(a);
     }
 
     void visit(expr * e) {
