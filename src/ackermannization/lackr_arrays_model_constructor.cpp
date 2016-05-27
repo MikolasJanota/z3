@@ -22,6 +22,7 @@
 #include"bv_rewriter.h"
 #include"bool_rewriter.h"
 #include"array_decl_plugin.h"
+#include"union_find.h"
 
 struct lackr_arrays_model_constructor::imp {
     public:
@@ -46,6 +47,7 @@ struct lackr_arrays_model_constructor::imp {
             , m_qued_rds(m)
             , m_qued_vals(m)
             , m_qued_reasons(m)
+            , m_uf(m_uf_ctx)
         {}
 
         ~imp() {
@@ -68,10 +70,14 @@ struct lackr_arrays_model_constructor::imp {
                 }
             }
             {
-                obj_map<expr, expr2read_info_t *>::iterator i = m_read_vals.begin();
-                const obj_map<expr, expr2read_info_t *>::iterator e = m_read_vals.end();
+                expr2id::iterator i = m_array_ids.begin();
+                expr2id::iterator e = m_array_ids.end();
                 for (; i != e; ++i) {
-                    expr2read_info_t * t = i->get_value();
+                    const unsigned id = i->m_value;
+                    expr* const e = i->m_key;
+                    const unsigned representative = m_uf.find(id);
+                    if (id != representative) continue;
+                    expr2read_info_t * t = m_read_vals[id];
                     expr2read_info_t::iterator ti = t->begin();
                     const expr2read_info_t::iterator te = t->end();
                     for (; ti != te; ++ti) {
@@ -81,10 +87,13 @@ struct lackr_arrays_model_constructor::imp {
                         m_m.dec_ref(ri.value);
                         m_m.dec_ref(ri.rd);
                     }
-                    m_m.dec_ref(i->m_key);
                     dealloc(t);
-                    i->m_value = NULL;
                 }
+            }
+            {
+                expr2id::iterator i = m_array_ids.begin();
+                const expr2id::iterator e = m_array_ids.end();
+                for (;  i != e; ++i) m_m.dec_ref(i->m_key);
             }
         }
 
@@ -94,12 +103,38 @@ struct lackr_arrays_model_constructor::imp {
         //
         bool check() {
             bool retv = true;
+
             for (unsigned i = 0; i < m_abstr_model->get_num_constants(); i++) {
                 func_decl * const c = m_abstr_model->get_constant(i);
                 app * const  _term = m_info->find_term(c);
+                if (_term && m_m.is_eq(_term)) continue;
                 expr * const term  = _term ? _term : m_m.mk_const(c);
                 if (!check_term(term)) retv = false;
             }
+
+            expr* lhs;
+            expr* rhs;
+            for (unsigned i = 0; i < m_abstr_model->get_num_constants(); i++) {
+                func_decl * const c = m_abstr_model->get_constant(i);
+                app * const  term = m_info->find_term(c);
+                if (!term) continue;
+                if (!m_m.is_eq(term, lhs, rhs)) continue;
+                if (!m_m.is_true(m_abstr_model->get_const_interp(c))) continue;
+                SASSERT(m_ar_util.is_array(lhs) && m_ar_util.is_array(rhs));
+                register_array(lhs);
+                register_array(rhs);
+                link_arrays(lhs, rhs);
+            }
+
+            m_read_vals.resize(m_array_ids.size(), NULL);
+            for (unsigned id = 0; id < m_array_ids.size(); ++id) {
+                 const unsigned representative = m_uf.find(id);
+                 if (m_read_vals[representative] == NULL) {
+                    m_read_vals[representative] = alloc(expr2read_info_t);
+                 }
+                 m_read_vals[id] = m_read_vals[representative];
+            }
+
             retv = retv && process_read_que();
             return retv;
         }
@@ -147,19 +182,20 @@ struct lackr_arrays_model_constructor::imp {
                 }
             }
             {
-                obj_map<expr, expr2read_info_t *>::iterator i = m_read_vals.begin();
-                const obj_map<expr, expr2read_info_t *>::iterator e = m_read_vals.end();
+                expr2id::iterator i = m_array_ids.begin();
+                expr2id::iterator e = m_array_ids.end();
                 for (; i != e; ++i) {
-                    expr2read_info_t * t = i->get_value();
-                    expr * const _a = i->m_key;
-                    if (!is_app(_a)) continue;
-                    app * const a = to_app(_a);
+                    const unsigned id = i->m_value;
+                    expr* const e = i->m_key;
+                    if (!is_app(e)) continue;
+                    app * const a = to_app(e);
                     if (a->get_num_args() != 0) continue;
                     sort * const  arr_s = a->get_decl()->get_range();
                     SASSERT(get_array_arity(arr_s) == 1);
                     sort * ix_s = get_array_domain(arr_s, 0);
                     sort * const rg_s = get_array_range(arr_s);
                     func_interp * const fi = alloc(func_interp, m_m, 1);
+                    expr2read_info_t* const t = m_read_vals[id];
                     expr2read_info_t::iterator ti = t->begin();
                     const expr2read_info_t::iterator te = t->end();
                     expr * args[1];
@@ -324,13 +360,31 @@ struct lackr_arrays_model_constructor::imp {
             return true;
         }
 
+        typedef obj_map<expr,unsigned> expr2id;
+        expr2id                         m_array_ids;
+        union_find_default_ctx m_uf_ctx;
+        union_find<union_find_default_ctx> m_uf;
+
+
+        void register_array(expr * a) {
+            SASSERT(m_ar_util.is_array(a));
+            expr2id::iterator i = m_array_ids.find_iterator(a);
+            if (i != m_array_ids.end())  return;
+            const unsigned id = m_array_ids.size();
+            m_m.inc_ref(a);
+            m_array_ids.insert(a, id);
+            VERIFY(m_uf.mk_var() == id);
+            TRACE("model_constructor", tout << "array id(" << mk_ismt2_pp(a, m_m, 2) << "--->"
+                    << id << ")\n";);
+        }
+
         //
         // Check and record the value for a given term, given that all arguments are already checked.
         //
         bool mk_value(app * a) {
             if (is_val(a)) return true; // skip numerals
             if (m_ar_util.is_array(a))  {
-                get_read_vals(a);
+                register_array(a);
                 return true; // skip array values
             }
             TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
@@ -407,7 +461,7 @@ struct lackr_arrays_model_constructor::imp {
             return true;
         }
 
-        obj_map<expr, expr2read_info_t*> m_read_vals;
+        vector<expr2read_info_t*> m_read_vals;
         expr_ref_vector   m_qued_dests;
         expr_ref_vector   m_qued_rds;
         expr_ref_vector   m_qued_vals;
@@ -565,17 +619,21 @@ struct lackr_arrays_model_constructor::imp {
             return true;
         }
 
+        void link_arrays(expr* a, expr* b) {
+            SASSERT(m_ar_util.is_array(a));
+            SASSERT(m_ar_util.is_array(b));
+            TRACE("model_constructor", tout << "linking arrays(\n" 
+                    << mk_ismt2_pp(a, m_m, 2) << "\n"
+                    << mk_ismt2_pp(b, m_m, 2) << ")\n";);
+            const unsigned id_a = m_array_ids.find(a);
+            const unsigned id_b = m_array_ids.find(b);
+            m_uf.merge(id_a, id_b);
+        }
+
         expr2read_info_t* get_read_vals(expr* a) {
-            obj_map<expr, expr2read_info_t *>::iterator i = m_read_vals.find_iterator(a);
-            expr2read_info_t *retv(NULL);
-            if (i == m_read_vals.end()) {
-                retv = alloc(expr2read_info_t);
-                m_read_vals.insert(a, retv);
-                m_m.inc_ref(a);
-            }  else{
-                retv = i->get_value();
-            }
-            return retv;
+            SASSERT(m_ar_util.is_array(a));
+            const unsigned id_a = m_array_ids.find(a);
+            return m_read_vals[id_a];
         }
 
         bool mk_value_select(app* a,

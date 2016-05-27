@@ -63,10 +63,7 @@ void lackr_arrays::build_abstraction_map() {
         app * const fc = m_m.mk_fresh_const("select", s);
         m_info->set_abstr(a, fc);
         TRACE("lackr", tout << "abstr term "
-            << mk_ismt2_pp(a, m_m, 2)
-            << " -> "
-            << mk_ismt2_pp(fc, m_m, 2)
-            << "\n";);
+            << mk_ismt2_pp(a, m_m, 2) << " -> " << mk_ismt2_pp(fc, m_m, 2) << "\n";);
     }
 
     for (app_set::iterator i = m_eqs.begin(); i != m_eqs.end(); ++i) {
@@ -75,11 +72,8 @@ void lackr_arrays::build_abstraction_map() {
         sort* const s = m_m.mk_bool_sort();
         app * const fc = m_m.mk_fresh_const("eq", s);
         m_info->set_abstr(a, fc);
-        TRACE("lackr", tout << "abstr term "
-            << mk_ismt2_pp(a, m_m, 2)
-            << " -> "
-            << mk_ismt2_pp(fc, m_m, 2)
-            << "\n";);
+        TRACE("lackr", tout << "abstr eq "
+            << mk_ismt2_pp(a, m_m, 2) << " -> " << mk_ismt2_pp(fc, m_m, 2) << "\n";);
     }
 
     lackr::build_abstraction_map();
