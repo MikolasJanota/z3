@@ -31,10 +31,11 @@
 #include"model_constructor.h"
 
 struct lackr_stats {
-    lackr_stats() : m_it(0), m_ackrs_sz(0) {}
-    void reset() { m_it = m_ackrs_sz = 0; }
+    lackr_stats() : m_it(0), m_ackrs_sz(0), m_arr_lemmas_sz(0) {}
+    void reset() { m_it = m_ackrs_sz = m_arr_lemmas_sz =  0; }
     unsigned    m_it;       // number of lazy iterations
     unsigned    m_ackrs_sz; // number of congruence constraints
+    unsigned    m_arr_lemmas_sz;
 };
 
 /** \brief

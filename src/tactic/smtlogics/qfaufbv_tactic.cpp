@@ -90,8 +90,9 @@ public:
 
     virtual void collect_statistics(statistics & st) const {
         ackermannization_params p(m_p);
-        if (!p.eager()) st.update("lackr-its", m_st.m_it);
+        st.update("lackr-its", m_st.m_it);
         st.update("ackr-constraints", m_st.m_ackrs_sz);
+        st.update("array-lemmas", m_st.m_arr_lemmas_sz);        
     }
 
     virtual void reset_statistics() { m_st.reset(); }

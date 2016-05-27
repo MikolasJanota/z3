@@ -117,6 +117,7 @@ lbool lackr_arrays::lazy() {
         }
         const expr_ref_vector& lemmas = m_mc->get_array_lemmas();
         for (expr_ref_vector::iterator i = lemmas.begin(); i != lemmas.end(); ++i) {
+            m_st.m_arr_lemmas_sz++;
             m_sat->assert_expr(*i);
         }
     }
