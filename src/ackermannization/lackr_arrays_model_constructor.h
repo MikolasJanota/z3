@@ -26,18 +26,18 @@ class lackr_arrays_model_constructor : public model_constructor {
     public:
         lackr_arrays_model_constructor(ast_manager& m, ackr_info_ref info);
         virtual ~lackr_arrays_model_constructor();
-        virtual bool check(model_ref& abstr_model);
+        bool check(model_ref& abstr_model);
 
-        virtual const expr_ref_vector& get_array_lemmas() {
+        const expr_ref_vector& get_array_lemmas() {
             SASSERT(m_state == CONFLICT);
             return m_array_lemmas;
         }
 
-        virtual const conflict_list& get_conflicts() {
+        const conflict_list& get_conflicts() {
             SASSERT(m_state == CONFLICT);
             return m_conflicts;
         }
-        virtual void make_model(model_ref& model);
+        void make_model(model_ref& model);
 
         //
         // Reference counting

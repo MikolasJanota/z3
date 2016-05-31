@@ -66,14 +66,20 @@ class ackr_info {
             return rv;
         }
 
+
+        inline app* get_abstr_core(app* term)  const {
+            return m_t2c.find(term);
+        }
+
         inline app* get_abstr(app* term)  const {
-            app * const rv = m_t2c.find(term);
+            app * const rv = get_abstr_core(term);
             SASSERT(rv);
             return rv;
         }
 
+
         inline void seal() {
-            m_sealed=true;
+            m_sealed = true;
             m_er->set_substitution(&m_subst);
         }
 

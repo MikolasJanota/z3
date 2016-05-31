@@ -221,14 +221,9 @@ lbool lackr::eager() {
     return m_sat->check_sat(0, 0);
 }
 
-model_constructor* lackr::mk_model_constructor(ast_manager& m, ackr_info_ref& info) {
-    return alloc(lackr_model_constructor, m, info);
-}
-
 lbool lackr::lazy() {
     SASSERT(m_is_init);
-    //lackr_model_constructor mc(m_m, m_info);
-    scoped_ptr<model_constructor> mc = mk_model_constructor(m_m, m_info);
+    scoped_ptr<lackr_model_constructor> mc = alloc(lackr_model_constructor, m_m, m_info);
     push_abstraction();
     unsigned ackr_head = 0;
     while (1) {

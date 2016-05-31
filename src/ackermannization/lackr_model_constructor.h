@@ -27,12 +27,12 @@ class lackr_model_constructor : public model_constructor {
     public:
         lackr_model_constructor(ast_manager& m, ackr_info_ref info);
         virtual ~lackr_model_constructor();
-        virtual bool check(model_ref& abstr_model);
-        virtual const conflict_list& get_conflicts() {
+        bool check(model_ref& abstr_model);
+        const conflict_list& get_conflicts() {
             SASSERT(m_state == CONFLICT);
             return m_conflicts;
         }
-        virtual void make_model(model_ref& model);
+        void make_model(model_ref& model);
 
         //
         // Reference counting

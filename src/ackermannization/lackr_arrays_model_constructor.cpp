@@ -206,8 +206,7 @@ struct lackr_arrays_model_constructor::imp {
                     }
                     fi->set_else(m_m.get_some_value(rg_s));
                     sort * dom[1] = { ix_s };
-                    // a->get_decl()->get_name()
-                    func_decl * const fd = m_m.mk_fresh_func_decl(1, dom, rg_s);
+                    func_decl * const fd = m_m.mk_fresh_func_decl(a->get_decl()->get_name(), symbol::null, 1, dom, rg_s);
                     destination->register_decl(fd, fi);
                     parameter p[1] = { parameter(fd) };
                     destination->register_decl(a->get_decl(), m_m.mk_app(m_ar_util.get_family_id(), OP_AS_ARRAY, 1, p));

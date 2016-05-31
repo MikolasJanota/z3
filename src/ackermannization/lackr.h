@@ -28,7 +28,6 @@
 #include"util.h"
 #include"tactic_exception.h"
 #include"goal.h"
-#include"model_constructor.h"
 
 struct lackr_stats {
     lackr_stats() : m_it(0), m_ackrs_sz(0), m_arr_lemmas_sz(0) {}
@@ -123,7 +122,5 @@ class lackr {
         // Collect all uninterpreted terms, skipping 0-arity.
         //
         bool collect_terms();
-
-        virtual model_constructor* mk_model_constructor(ast_manager& m, ackr_info_ref& info);
 };
 #endif /* LACKR_H_ */
