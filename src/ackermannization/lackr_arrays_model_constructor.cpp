@@ -101,6 +101,7 @@ struct lackr_arrays_model_constructor::imp {
             , m_ackr_helper(m)
             , m_ar_util(m)
             , m_que(m, m_ar_util)
+            , m_eq_vars(m)
         {}
 
         ~imp() {
@@ -173,7 +174,9 @@ struct lackr_arrays_model_constructor::imp {
                 SASSERT(m_ar_util.is_array(lhs) && m_ar_util.is_array(rhs));
                 register_array(lhs);
                 register_array(rhs);
-                link_arrays(m_m.mk_const(c), lhs, rhs);
+                expr * ev = m_m.mk_const(c);
+                m_eq_vars.push_back(ev);
+                link_arrays(ev, lhs, rhs);
             }
 
             expr_set::iterator i = m_arrays.begin();
@@ -293,6 +296,12 @@ struct lackr_arrays_model_constructor::imp {
             fi->insert_new_entry(term->get_args(), value);
         }
     private:
+        struct val_info { expr * value; app * source_term; };
+        struct read_info { expr* rd; expr * value; expr * reason; };
+        typedef obj_map<app, expr *> app2val_t;
+        typedef obj_map<expr, read_info> expr2read_info_t;
+        typedef obj_map<app, val_info> values2val_t;
+    private:
         ast_manager&                    m_m;
         ackr_info_ref                   m_info;
         model_ref                       m_abstr_model;
@@ -304,12 +313,9 @@ struct lackr_arrays_model_constructor::imp {
         model                           m_empty_model;
         array_util                      m_ar_util;
         read_que                        m_que;
+        expr_ref_vector                  m_eq_vars;
+        obj_map<expr, expr2read_info_t*> m_read_vals;
     private:
-        struct val_info { expr * value; app * source_term; };
-        struct read_info { expr* rd; expr * value; expr * reason; };
-        typedef obj_map<app, expr *> app2val_t;
-        typedef obj_map<expr, read_info> expr2read_info_t;
-        typedef obj_map<app, val_info> values2val_t;
         values2val_t     m_values2val;
         app2val_t        m_app2val;
         ptr_vector<expr> m_stack;
@@ -544,7 +550,6 @@ struct lackr_arrays_model_constructor::imp {
             return true;
         }
 
-        obj_map<expr, expr2read_info_t*> m_read_vals;
 
         void get_abstract(expr* rd, expr_ref& res) {
             SASSERT(m_ar_util.is_select(rd) || m_ar_util.is_store(rd));

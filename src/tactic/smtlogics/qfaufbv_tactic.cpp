@@ -61,7 +61,7 @@ public:
         fail_if_unsat_core_generation("qfaufbv_ackr", g);
         fail_if_proof_generation("qfaufbv_ackr", g);
 
-        TRACE("qfaufbv_ackr_tactic", g->display(tout << "goal:\n"););
+        TRACE("qfaufbv_ackr", g->display(tout << "goal:\n"););
         // running implementation
         expr_ref_vector flas(m);
         const unsigned sz = g->size();
@@ -78,6 +78,8 @@ public:
         if (g->models_enabled() && (o == l_true)) {
             model_ref new_model = alloc(model, m);
             imp->make_model(new_model);
+            TRACE("qfaufbv_ackr",
+                model_smt2_pp(tout << "model(\n", m_m, *(new_model.get()), 2); tout << ")\n"; );
             mc = model2model_converter(new_model.get());
         }
     }
