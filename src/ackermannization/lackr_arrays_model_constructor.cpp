@@ -595,6 +595,9 @@ struct lackr_arrays_model_constructor::imp {
 
             const expr2read_info_t::iterator i = rvs->find_iterator(ix_val);
             if (i == rvs->end()) { // new val
+                TRACE("model_constructor", tout << "new val " << mk_ismt2_pp(dest, m_m, 2) 
+                << "[" << mk_ismt2_pp(ix_val, m_m, 2) << "] = "
+                << mk_ismt2_pp(val.get(), m_m, 2) << std::endl;);
                 read_info ri;
                 ri.reason = reason.get();
                 ri.value = val.get();
