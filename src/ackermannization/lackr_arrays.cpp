@@ -16,6 +16,7 @@
 --*/
 #include"lackr_arrays.h"
 #include"lackr_arrays_model_constructor.h"
+#include"model_smt2_pp.h"
 
 lackr_arrays::lackr_arrays(ast_manager& m, params_ref p, lackr_stats& st,
             expr_ref_vector& formulas, solver * uffree_solver)
@@ -118,7 +119,7 @@ lbool lackr_arrays::lazy() {
     while (1) {
         m_st.m_it++;
         checkpoint();
-        TRACE("lackr", tout << "lazy check: " << m_st.m_it << "\n";);
+        TRACE("lackr", tout << "lazy check: #" << m_st.m_it << std::endl;);
         TRACE("lackr", m_sat->display(tout););
         const lbool r = m_sat->check_sat(0, 0);
         if (r == l_undef) return l_undef; // give up
@@ -126,6 +127,7 @@ lbool lackr_arrays::lazy() {
         // reconstruct model
         model_ref am;
         m_sat->get_model(am);
+        TRACE("lackr", model_smt2_pp(tout << "abstr_model(\n", m_m, *(am.get()), 2); tout << ")\n"; );
         const bool mc_res = m_mc->check(am);
         TRACE("lackr", tout << "lazy check " << (mc_res ? "OK" : "confl") << std::endl;);
         if (mc_res) return l_true; // model okay

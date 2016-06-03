@@ -91,8 +91,8 @@ struct lackr_model_constructor::imp {
             }
 
             {
+                app2val_t::iterator i = m_app2val.begin();
                 const app2val_t::iterator e = m_app2val.end();
-                app2val_t::iterator i = m_app2val.end();
                 for (; i != e; ++i) {
                     app * a = i->m_key;
                     if (a->get_num_args()) continue;

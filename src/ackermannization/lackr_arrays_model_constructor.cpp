@@ -106,7 +106,7 @@ struct lackr_arrays_model_constructor::imp {
             for (unsigned i = 0; i < m_abstr_model->get_num_constants(); i++) {
                 func_decl * const c = m_abstr_model->get_constant(i);
                 app * const  _term = m_info->find_term(c);
-                if (_term && m_m.is_eq(_term)) continue;
+                //if (_term && m_m.is_eq(_term)) continue;
                 expr * const term  = _term ? _term : m_m.mk_const(c);
                 if (!check_term(term)) retv = false;
             }
@@ -126,7 +126,7 @@ struct lackr_arrays_model_constructor::imp {
             }
 
             vector<std::pair<expr*, expr*> >::iterator vsi = m_valued_selects.begin();
-            vector<std::pair<expr*, expr*> >::iterator vse = m_valued_selects.begin();
+            const vector<std::pair<expr*, expr*> >::iterator vse = m_valued_selects.end();
             for ( ; vsi != vse; ++vsi) {
                 app * a = to_app(vsi->first);
                 SASSERT(m_ar_util.is_select(a));
@@ -177,8 +177,8 @@ struct lackr_arrays_model_constructor::imp {
             }
 
             {
+                app2val_t::iterator i = m_app2val.begin();
                 const app2val_t::iterator e = m_app2val.end();
-                app2val_t::iterator i = m_app2val.end();
                 for (; i != e; ++i) {
                     app * a = i->m_key;
                     if (a->get_num_args()) continue;
@@ -226,13 +226,12 @@ struct lackr_arrays_model_constructor::imp {
                     expr2read_info_t::iterator ti = t->begin();
                     const expr2read_info_t::iterator te = t->end();
                     expr * args[1];
-                    TRACE("model_constructor", tout << "array (\n" << mk_ismt2_pp(a, m_m, 2) << ")\n" ;);
                     for (; ti != te; ++ti) {
                         const read_info& ri = ti->m_value;
                         args[0] = ti->m_key;
                         fi->insert_entry(args, ri.value);
-                        TRACE("model_constructor", tout << "entry ("
-                                << mk_ismt2_pp(ti->m_key, m_m, 2)
+                        TRACE("model_constructor", tout << "entry (" << mk_ismt2_pp(a, m_m, 2)
+                                << "[" << mk_ismt2_pp(ti->m_key, m_m, 2) << "]"
                                 << "->"
                                 << mk_ismt2_pp(ri.value, m_m, 2)
                                 << ")\n" ;);
@@ -359,6 +358,7 @@ struct lackr_arrays_model_constructor::imp {
                 expr* ix_val(NULL);
                 const bool b = eval_cached(to_app(args[1]), ix_val); // TODO: OK conversion to_app?
                 if (!b) { // bailing out because args eval failed previously
+                    CTRACE("model_constructor", m_conflicts.empty() && m_array_lemmas.empty(), tout << "bug arg val(\n" << mk_ismt2_pp(args[1], m_m, 2) << '\n'; );
                     return false;
                 }
                 return mk_value_select(a, ix_val, result);
@@ -369,8 +369,8 @@ struct lackr_arrays_model_constructor::imp {
             for (unsigned i = 0; i < num; ++i) {
                 expr * val;
                 const bool b = eval_cached(to_app(args[i]), val); // TODO: OK conversion to_app?
-                CTRACE("model_constructor", m_conflicts.empty() && !b, tout << "fail arg val(\n" << mk_ismt2_pp(args[i], m_m, 2) << '\n'; );
                 if (!b) { // bailing out because args eval failed previously
+                    CTRACE("model_constructor", m_conflicts.empty() && m_array_lemmas.empty(), tout << "bug arg val(\n" << mk_ismt2_pp(args[i], m_m, 2) << '\n'; );
                     return false;
                 }
                 TRACE("model_constructor", tout <<
@@ -418,6 +418,11 @@ struct lackr_arrays_model_constructor::imp {
         //
         bool mk_value(app * a) {
             if (is_val(a)) return true; // skip numerals
+            expr* lhs;
+            expr* rhs;
+            if (m_m.is_eq(a, lhs, rhs) && m_ar_util.is_array(lhs)) {
+                return true; // skip array equalities
+            }
             if (m_ar_util.is_array(a))  {
                 register_array(a);
                 return true; // skip array values
@@ -432,7 +437,7 @@ struct lackr_arrays_model_constructor::imp {
                 << mk_ismt2_pp(result.get(), m_m, 2)<< ")\n"; );
             CTRACE("model_constructor",
                 !is_val(result.get()),
-                tout << "eval fail\n" << mk_ismt2_pp(a, m_m, 2) << mk_ismt2_pp(result, m_m, 2) << "\n";
+                tout << "eval bug\n" << mk_ismt2_pp(a, m_m, 2) << mk_ismt2_pp(result, m_m, 2) << "\n";
             );
             SASSERT(is_val(result.get()));
             m_app2val.insert(a, result.get()); // memoize
@@ -521,7 +526,7 @@ struct lackr_arrays_model_constructor::imp {
             SASSERT(inv());
             TRACE("model_constructor", tout << "que_read(\n" << mk_ismt2_pp(dest, m_m, 2)
                     << "," << mk_ismt2_pp(rd, m_m, 2) << "," << mk_ismt2_pp(val, m_m, 2)
-                    << "," << ")\n";);
+                    << ")\n";);
             m_qued_dests.push_back(get_representative(dest));
             m_qued_rds.push_back(rd);
             m_qued_vals.push_back(val);
@@ -542,7 +547,7 @@ struct lackr_arrays_model_constructor::imp {
             m_qued_reasons.pop_back();
             TRACE("model_constructor", tout << "pop_read(\n" << dest
                     << "," << mk_ismt2_pp(rd, m_m, 2) << "," << mk_ismt2_pp(val, m_m, 2)
-                    << "," << ")\n";);
+                    << ")\n";);
             SASSERT(inv());
             SASSERT(m_ar_util.is_select(rd) || m_ar_util.is_store(rd));
             SASSERT(m_uf.is_root(dest));
@@ -582,38 +587,16 @@ struct lackr_arrays_model_constructor::imp {
         }
 
         bool process_read(unsigned dest, expr_ref& rd, expr_ref& val, expr_ref& reason) {
-            TRACE("model_constructor",
-                    tout << "processing read " << mk_ismt2_pp(rd, m_m, 2) << " : " << dest << "," << mk_ismt2_pp(val.get(), m_m, 2) << ",";
+            TRACE("model_constructor", tout << "processing read " << mk_ismt2_pp(rd, m_m, 2) << " : " << dest << "," << mk_ismt2_pp(val.get(), m_m, 2) << ",";
                     if (reason.get()) tout << mk_ismt2_pp(reason.get(), m_m, 2); else tout << "NULL";
                     tout << std::endl;);
-            SASSERT(m_uf.is_root(dest));
-            unsigned curr = dest;
-            expr_ref dest_e(m_m);
-            bool rv = record_read(dest, rd, val, reason);
-            expr * ix_val(NULL);
-            if (!get_ix_val(rd, ix_val)) return false;
-            TRACE("model_constructor",tout<<"root " << dest << "\n";);
-            do {
-                TRACE("model_constructor",tout<<"it " << curr << "\n";);
-                dest_e = m_arrays[curr];
-                curr = m_uf.next(curr);
-                rv = rv & propagate_read(dest_e, rd, ix_val, val, reason);
-            } while (curr != dest);
-            return rv;
-        }
 
-        bool record_read(unsigned dest, expr_ref& rd, expr_ref& val, expr_ref& reason) {
             expr2read_info_t * const rvs = get_read_vals(dest);
             expr * ix_val(NULL);
             if (!get_ix_val(rd, ix_val)) return false;
-            TRACE("model_constructor",
-                    tout << "record_read("
-                    << "rd: " << mk_ismt2_pp(rd, m_m) << std::endl
-                    << "ix_val: " << mk_ismt2_pp(ix_val, m_m) << std::endl
-                    << "val: " << mk_ismt2_pp(val, m_m) << std::endl;
-                    );
+
             const expr2read_info_t::iterator i = rvs->find_iterator(ix_val);
-            if (i == rvs->end()) {
+            if (i == rvs->end()) { // new val
                 read_info ri;
                 ri.reason = reason.get();
                 ri.value = val.get();
@@ -625,12 +608,23 @@ struct lackr_arrays_model_constructor::imp {
                 rvs->insert(ix_val, ri);
             }
             else {
-                if (m_m.are_distinct(i->m_value.value, val)) {
+                if (m_m.are_distinct(i->m_value.value, val)) { // conflict
                     mk_arr_lemma(rd, reason, i->m_value);
                     return false;
                 }
+                return true; // same as old val
             }
-            return true;
+
+            SASSERT(m_uf.is_root(dest));
+            unsigned curr = dest;
+            expr_ref dest_e(m_m);
+            bool rv = true;
+            do {
+                dest_e = m_arrays[curr];
+                curr = m_uf.next(curr);
+                rv = rv & propagate_read(dest_e, rd, ix_val, val, reason);
+            } while (curr != dest);
+            return rv;
         }
 
         bool process_read_que() {
@@ -668,6 +662,30 @@ struct lackr_arrays_model_constructor::imp {
         }
 
         bool propagate_read(expr_ref& dest, expr_ref& rd, expr* ix_val, expr_ref& val, expr_ref& reason) {
+            bool retv = true;
+            if (m_ar_util.is_select(rd)) {
+                vector<expr*>::iterator i = m_arrays.begin();
+                const vector<expr*>::iterator e = m_arrays.end();
+                for ( ; i != e; ++i) {
+                    if (!m_ar_util.is_store(*i)) continue;
+                    app* const store1 = to_app(*i);
+                    expr* const store1_dest = store1->get_arg(0);
+                    if (store1_dest != dest.get()) continue;
+                    expr* const store1_ix = store1->get_arg(1);
+                    expr* store1_ix_val(NULL);
+                    if (!eval_cached(store1_ix, store1_ix_val)) {
+                        retv = false;
+                        continue;
+                    }
+                    if (m_m.are_distinct(store1_ix_val, ix_val)) {
+                        expr_ref new_reason(m_m);
+                        expr* const rd_ix = get_ix(rd);
+                        new_reason = mk_and_safe(reason, m_m.mk_not(m_m.mk_eq(rd_ix, store1_ix)));
+                        que_read(store1, rd, val, new_reason);
+                    }
+                }
+            }
+
             if (m_ar_util.is_select(rd) &&  m_ar_util.is_store(dest)) {
                 app* const sel = to_app(rd);
                 app* const str = to_app(dest);
@@ -683,14 +701,14 @@ struct lackr_arrays_model_constructor::imp {
                     que_read(str->get_arg(0), rd, val, new_reason);
                 } else {
                      expr* store_val(NULL);
-                     if (!get_val(str, store_val)) return false;
+                     if (get_val(str, store_val)) return false;
                      TRACE("model_constructor", tout << "stored value(\n" << mk_ismt2_pp(store_val, m_m, 2) << ")\n";);
                      new_reason = mk_and_safe(reason, m_m.mk_eq(sel_ix_a, str_ix_a));
                      que_read(dest, dest, expr_ref(store_val, m_m), new_reason);
                 }
 
             }
-            return true;
+            return retv;
         }
 
         void link_arrays(expr* a, expr* b) {
@@ -723,6 +741,9 @@ struct lackr_arrays_model_constructor::imp {
             if (result.get() == NULL) { // TODO: avoid model completion?
                 result = m_abstr_model->get_some_value(a_fd->get_range());
             }
+            TRACE("model_constructor", tout << "pre-queing read(\n"
+                    << mk_ismt2_pp(a, m_m, 2) << "\n"
+                    << mk_ismt2_pp(result.get(), m_m, 2) << ")\n";);
             m_valued_selects.push_back(std::make_pair(a, result.get()));
             return true;
         }
