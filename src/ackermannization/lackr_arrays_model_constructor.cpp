@@ -667,9 +667,11 @@ struct lackr_arrays_model_constructor::imp {
                         continue;
                     }
                     if (m_m.are_distinct(store1_ix_val, ix_val)) {
-                        expr_ref new_reason(m_m);
+                        expr_ref new_reason(m_m), rd_ix_a(m_m), store1_ix_a(m_m);
                         expr* const rd_ix = get_ix(rd);
-                        new_reason = mk_and_safe(reason, m_m.mk_not(m_m.mk_eq(rd_ix, store1_ix)));
+                        m_info->abstract(rd_ix, rd_ix_a);
+                        m_info->abstract(store1_ix, store1_ix_a);
+                        new_reason = mk_and_safe(reason, m_m.mk_not(m_m.mk_eq(rd_ix_a, store1_ix_a)));
                         m_que.que_read(store1, rd, val, new_reason);
                     }
                 }
