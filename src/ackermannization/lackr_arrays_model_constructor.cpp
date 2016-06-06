@@ -23,6 +23,7 @@
 #include"bool_rewriter.h"
 #include"array_decl_plugin.h"
 #include"obj_hashtable.h"
+#include"th_rewriter.h"
 
 struct read_que {
     read_que(ast_manager& m, array_util&  ar_util)
@@ -91,6 +92,7 @@ struct lackr_arrays_model_constructor::imp {
             )
             : m_m(m)
             , m_info(info)
+            , m_simp(m)
             , m_abstr_model(abstr_model)
             , m_conflicts(conflicts)
             , m_array_lemmas(array_lemmas)
@@ -304,6 +306,7 @@ struct lackr_arrays_model_constructor::imp {
     private:
         ast_manager&                    m_m;
         ackr_info_ref                   m_info;
+        th_rewriter                     m_simp;
         model_ref                       m_abstr_model;
         conflict_list&                  m_conflicts;
         expr_ref_vector&                m_array_lemmas;
@@ -648,9 +651,17 @@ struct lackr_arrays_model_constructor::imp {
             m_info->abstract(get_ix(rd1), ix1_a);
             lhs = mk_and_safe(mk_and_safe(reason, ri1.reason), m_m.mk_eq(ix_a, ix1_a));
             rhs = m_m.mk_eq(rd_a, rd1_a);
-            expr * const lemma = m_m.mk_implies(lhs, rhs);
+            expr_ref lemma(m_m);
+            lemma = m_m.mk_implies(lhs, rhs);
+            m_simp(lemma);
             m_array_lemmas.push_back(lemma);
             TRACE("model_constructor", tout << "array conflict, with lemma" << mk_ismt2_pp(lemma, m_m) << std::endl;);
+        }
+
+        void simp(expr_ref& r) {
+            if (r.get() == NULL) return;
+            m_simp(r);
+            if (m_m.is_true(r)) r = NULL;
         }
 
         bool propagate_read(expr_ref& dest, expr_ref& rd, expr* ix_val, expr_ref& val, expr_ref& reason) {
@@ -675,6 +686,7 @@ struct lackr_arrays_model_constructor::imp {
                         m_info->abstract(rd_ix, rd_ix_a);
                         m_info->abstract(store1_ix, store1_ix_a);
                         new_reason = mk_and_safe(reason, m_m.mk_not(m_m.mk_eq(rd_ix_a, store1_ix_a)));
+                        simp(new_reason);
                         m_que.que_read(store1, rd, val, new_reason);
                     }
                 }
@@ -692,12 +704,14 @@ struct lackr_arrays_model_constructor::imp {
                 m_info->abstract(str_ix, str_ix_a);
                 if (m_m.are_distinct(str_ix_val, ix_val)) {
                     new_reason = mk_and_safe(reason, m_m.mk_not(m_m.mk_eq(sel_ix_a, str_ix_a)));
+                    simp(new_reason);
                     m_que.que_read(str->get_arg(0), rd, val, new_reason);
                 } else {
                      expr* store_val(NULL);
                      if (get_val(str, store_val)) return false;
                      TRACE("model_constructor", tout << "stored value(\n" << mk_ismt2_pp(store_val, m_m, 2) << ")\n";);
                      new_reason = mk_and_safe(reason, m_m.mk_eq(sel_ix_a, str_ix_a));
+                     simp(new_reason);
                      m_que.que_read(dest, dest, expr_ref(store_val, m_m), new_reason);
                 }
 
@@ -710,6 +724,7 @@ struct lackr_arrays_model_constructor::imp {
                 for ( ; i != e; ++i) {
                     edge& l = *i;
                     new_reason = mk_and_safe(l.link_var, reason);
+                    simp(new_reason);
                     m_que.que_read(l.neighbor, rd, val, new_reason);
                 }
             }
