@@ -655,7 +655,7 @@ struct lackr_arrays_model_constructor::imp {
 
         bool propagate_read(expr_ref& dest, expr_ref& rd, expr* ix_val, expr_ref& val, expr_ref& reason) {
             bool retv = true;
-            if (m_ar_util.is_select(rd)) {
+            if (1 /*prop up*/) {
                 expr_set::iterator i = m_arrays.begin();
                 const expr_set::iterator e = m_arrays.end();
                 for ( ; i != e; ++i) {
