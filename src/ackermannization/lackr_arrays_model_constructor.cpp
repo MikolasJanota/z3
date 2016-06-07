@@ -103,7 +103,6 @@ struct lackr_arrays_model_constructor::imp {
             , m_ackr_helper(m)
             , m_ar_util(m)
             , m_que(m, m_ar_util)
-            , m_eq_vars(m)
         {}
 
         ~imp() {
@@ -148,6 +147,18 @@ struct lackr_arrays_model_constructor::imp {
                 const expr_set::iterator e = m_arrays.end();
                 for (;  i != e; ++i) m_m.dec_ref(*i);
             }
+            {
+                expr_graph::iterator i = m_equality_graph.begin();
+                const expr_graph::iterator e = m_equality_graph.end();
+                for ( ; i != e; ++i) {
+                    neighbors * const n = i->m_value;
+                    neighbors::iterator i1 = n->begin();
+                    const neighbors::iterator e1 = n->end();
+                    for ( ; i1 != e1; ++i1) {
+                        m_m.dec_ref(i1->link_reason);
+                    }
+                }
+            }
         }
 
         //
@@ -176,16 +187,28 @@ struct lackr_arrays_model_constructor::imp {
                 SASSERT(m_ar_util.is_array(lhs) && m_ar_util.is_array(rhs));
                 register_array(lhs);
                 register_array(rhs);
-                expr * ev = m_m.mk_const(c);
-                m_eq_vars.push_back(ev);
-                link_arrays(ev, lhs, rhs);
+                link_arrays(m_m.mk_const(c), lhs, rhs);
             }
 
+            expr *c, *t, *e;
             expr_set::iterator i = m_arrays.begin();
-            expr_set::iterator e = m_arrays.end();
+            expr *c_val(NULL);
+            expr_ref c_a(m_m);
+            const expr_set::iterator e_arr = m_arrays.end();
+            for (i = m_arrays.begin(); i != e_arr; ++i) {
+                expr * const dest = *i;
+                if (!m_m.is_ite(dest, c, t, e)) continue;
+                const bool chk = eval_cached(c, c_val);
+                if (!chk) continue;
+                SASSERT(m_m.is_true(c_val) || m_m.is_false(c_val));
+                const bool ist = m_m.is_true(c_val);
+                m_info->abstract(c, c_a);
+                link_arrays(ist ? c_a.get() : m_m.mk_not(c_a), dest, ist ? t : e);
+            }
+
             expr_ref null_ref(NULL, m_m);
             expr_ref store_val_ref(NULL, m_m);
-            for (; i != e; ++i) {
+            for (i = m_arrays.begin(); i != e_arr; ++i) {
                 expr * const dest = *i;
                 if (!m_ar_util.is_store(dest)) continue;
                 expr* store_val(NULL);
@@ -316,7 +339,6 @@ struct lackr_arrays_model_constructor::imp {
         model                           m_empty_model;
         array_util                      m_ar_util;
         read_que                        m_que;
-        expr_ref_vector                  m_eq_vars;
         obj_map<expr, expr2read_info_t*> m_read_vals;
     private:
         values2val_t     m_values2val;
@@ -435,7 +457,7 @@ struct lackr_arrays_model_constructor::imp {
         }
 
         struct edge {
-            expr * link_var;
+            expr * link_reason;
             expr * neighbor;
         };
 
@@ -461,6 +483,7 @@ struct lackr_arrays_model_constructor::imp {
             SASSERT(m_ar_util.is_array(a));
             expr_set::iterator i = m_arrays.find(a);
             if (i != m_arrays.end())  return;
+            TRACE("model_constructor", tout << "register array(" << mk_ismt2_pp(a, m_m, 2) << ")\n";);
             m_m.inc_ref(a);
             m_arrays.insert(a);
         }
@@ -723,7 +746,7 @@ struct lackr_arrays_model_constructor::imp {
                 const neighbors::iterator e = n->end();
                 for ( ; i != e; ++i) {
                     edge& l = *i;
-                    new_reason = mk_and_safe(l.link_var, reason);
+                    new_reason = mk_and_safe(l.link_reason, reason);
                     simp(new_reason);
                     m_que.que_read(l.neighbor, rd, val, new_reason);
                 }
@@ -731,17 +754,18 @@ struct lackr_arrays_model_constructor::imp {
             return retv;
         }
 
-        void link_arrays(expr* link_var, expr* a, expr* b) {
-            SASSERT(m_ar_util.is_array(a));
-            SASSERT(m_ar_util.is_array(b));
+        void link_arrays(expr* link_reason, expr* a, expr* b) {
+            SASSERT(m_ar_util.is_array(a) && m_ar_util.is_array(b));
             TRACE("model_constructor", tout << "linking arrays(\n"
                     << mk_ismt2_pp(a, m_m, 2) << "\n" << mk_ismt2_pp(b, m_m, 2) << ")\n";);
             edge e;
             e.neighbor = b;
-            e.link_var = link_var;
+            e.link_reason = link_reason;
+            m_m.inc_ref(link_reason);
             get_neighbors(a)->push_back(e);
             e.neighbor = a;
             get_neighbors(b)->push_back(e);
+            m_m.inc_ref(link_reason);
         }
 
         inline expr2read_info_t* get_read_vals(expr* e) {
@@ -768,9 +792,6 @@ struct lackr_arrays_model_constructor::imp {
             if (result.get() == NULL) { // TODO: avoid model completion?
                 result = m_abstr_model->get_some_value(a_fd->get_range());
             }
-            TRACE("model_constructor", tout << "pre-queing read(\n"
-                    << mk_ismt2_pp(a, m_m, 2) << "\n"
-                    << mk_ismt2_pp(result.get(), m_m, 2) << ")\n";);
             m_que.que_read(a->get_arg(0), a, result, expr_ref(NULL, m_m));
             return true;
         }
