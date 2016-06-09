@@ -1420,7 +1420,7 @@ ast_manager::~ast_manager() {
                 std::cout << to_sort(a)->get_name() << "\n";
             }
             else {
-                std::cout << mk_ll_pp(a, *this, false);
+                std::cout << mk_ll_pp(a, *this, false) << "id: " << a->get_id() << "\n";
             }
         }
     });
@@ -1495,6 +1495,7 @@ void ast_manager::copy_families_plugins(ast_manager const & from) {
             if (m_family_manager.has_family(fid)) tout << get_family_id(fid_name) << "\n";);
       if (!m_family_manager.has_family(fid)) {
           family_id new_fid = mk_family_id(fid_name);
+          (void)new_fid;
           TRACE("copy_families_plugins", tout << "new target fid created: " << new_fid << " fid_name: " << fid_name << "\n";);
       }
       TRACE("copy_families_plugins", tout << "target fid: " << get_family_id(fid_name) << "\n";);
@@ -1573,6 +1574,7 @@ bool ast_manager::are_equal(expr * a, expr * b) const {
     }
     return false;
 }
+
 
 bool ast_manager::are_distinct(expr* a, expr* b) const {
     if (is_app(a) && is_app(b)) {
@@ -2561,6 +2563,8 @@ proof * ast_manager::mk_modus_ponens(proof * p1, proof * p2) {
     CTRACE("mk_modus_ponens", to_app(get_fact(p2))->get_arg(0) != get_fact(p1),
            tout << mk_pp(get_fact(p1), *this) << "\n" << mk_pp(get_fact(p2), *this) << "\n";);
     SASSERT(to_app(get_fact(p2))->get_arg(0) == get_fact(p1));
+    CTRACE("mk_modus_ponens", !is_ground(p2) && !has_quantifiers(p2), tout << "Non-ground: " << mk_pp(p2, *this) << "\n";);
+    CTRACE("mk_modus_ponens", !is_ground(p1) && !has_quantifiers(p1), tout << "Non-ground: " << mk_pp(p1, *this) << "\n";);
     if (is_reflexivity(p2))
         return p1;
     expr * f = to_app(get_fact(p2))->get_arg(1);
