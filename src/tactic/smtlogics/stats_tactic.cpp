@@ -74,6 +74,8 @@ protected:
     unsigned                             m_non_bin_bvmul;
     unsigned                             m_rem_div_by_const;
     unsigned                             m_count_ufs;
+    unsigned                             m_count_ex;
+    unsigned                             m_count_fa;
     unsigned m_count_BV_NUM;
     unsigned m_count_BADD;
     unsigned m_count_BMUL;
@@ -119,6 +121,8 @@ protected:
         m_non_bin_bvmul = 0;
         m_rem_div_by_const = 0;
         m_count_ufs = 0;
+        m_count_ex = 0;
+        m_count_fa = 0;
 
         m_count_BV_NUM = 0;
         m_count_BADD = 0;
@@ -166,6 +170,8 @@ protected:
         st.update("non_bin_bvmul", m_non_bin_bvmul);
         st.update("rem_div_by_const", m_rem_div_by_const);
         st.update("UFs", m_count_ufs);
+        st.update("ex_vars", m_count_ex);
+        st.update("fa_vars", m_count_fa);
 
         st.update("BV_NUM", m_count_BV_NUM);
         st.update("BADD", m_count_BADD);
@@ -287,6 +293,14 @@ protected:
         count_bv(a);
     }
 
+    void visit_q(quantifier const * q) {
+        unsigned nd = q->get_num_decls();
+        for (unsigned i = 0; i < nd; ++i) {
+            if (is_forall(q)) m_count_fa++;
+            if (is_exists(q)) m_count_ex++;
+        }
+    }
+
     void visit(expr * e) {
         ptr_vector<expr> stack;
         expr *           curr;
@@ -318,7 +332,11 @@ protected:
                     }
                     break;
                 case AST_QUANTIFIER:
+                    visit_q(to_quantifier(curr));
+                    visited.mark(curr, true);
+                    stack.pop_back();
                     stack.push_back(to_quantifier(curr)->get_expr());
+                    break;
                 default:
                     UNREACHABLE();
                     return;
