@@ -2068,7 +2068,7 @@ br_status bv_rewriter::mk_mul_eq(expr * lhs, expr * rhs, expr_ref & result) {
     return BR_FAILED;
 }
 
-br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {
+br_status bv_rewriter::mk_eq_core(expr * lhs, expr * rhs, expr_ref & result) {    
     if (lhs == rhs) {
         result = m().mk_true();
         return BR_DONE;
