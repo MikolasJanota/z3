@@ -27,6 +27,7 @@ Revision History:
 #include "ast_util.h"
 #include "th_rewriter.h"
 #include "model_v2_pp.h"
+#include "model_smt2_pp.h"
 #include "expr_functors.h"
 #include "for_each_expr.h"
 
@@ -138,6 +139,12 @@ class mbp::impl {
     }
 
     bool solve(model& model, app_ref_vector& vars, expr_ref_vector& lits) {
+        TRACE("qe",
+           tout << "solve: \nvars" << vars << "\n";
+           tout << "\nlits" << lits << "\n";
+           model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";
+        );
+
         expr_mark is_var, is_rem;
         if (vars.empty()) {
             return false;
