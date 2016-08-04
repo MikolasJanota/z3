@@ -29,6 +29,7 @@ Notes:
 #include"ufbv_rewriter_tactic.h"
 #include"quasi_macros_tactic.h"
 #include"ufbv_tactic.h"
+#include"qsat.h"
 
 
 tactic * mk_der_fp_tactic(ast_manager & m, params_ref const & p) {
@@ -70,5 +71,16 @@ tactic * mk_ufbv_tactic(ast_manager & m, params_ref const & p) {
     
     t->updt_params(p);
 
+    return t;
+}
+
+
+tactic * mk_ufbv_qsat_tactic(ast_manager & m, params_ref const & p) {
+    params_ref main_p(p);
+
+    tactic * t = and_then(repeat(mk_ufbv_preprocessor_tactic(m, main_p), 2),
+        mk_qsat_tactic(m, main_p));
+
+    t->updt_params(p);
     return t;
 }

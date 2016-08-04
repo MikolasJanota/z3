@@ -27,9 +27,12 @@ tactic * mk_ufbv_preprocessor_tactic(ast_manager & m, params_ref const & p = par
 
 tactic * mk_ufbv_tactic(ast_manager & m, params_ref const & p = params_ref());
 
+tactic * mk_ufbv_qsat_tactic(ast_manager & m, params_ref const & p = params_ref());
+
 /*
   ADD_TACTIC("bv",  "builtin strategy for solving BV problems (with quantifiers).", "mk_ufbv_tactic(m, p)")
   ADD_TACTIC("ufbv",  "builtin strategy for solving UFBV problems (with quantifiers).", "mk_ufbv_tactic(m, p)")
+  ADD_TACTIC("ufbv_qsat",  "builtin strategy for solving UFBV problems (with quantifiers) using qsat.", "mk_ufbv_qsat_tactic(m, p)")
 */
 
 #endif

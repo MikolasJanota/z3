@@ -423,6 +423,9 @@ public:
     }
 
     void preprocess_solve(model& model, app_ref_vector& vars, expr_ref_vector& fmls) {
+        TRACE("qe",
+           tout << "preprocess_solve in " << vars << " " << fmls << "\n";
+           model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";);
         extract_literals(model, fmls);
         bool change = true;
         while (change && !vars.empty()) {
@@ -433,9 +436,14 @@ public:
                 }
             }
         }        
+        TRACE("qe", tout << "preprocess_solve out " << vars << " " << fmls << "\n";);
     }
 
     void operator()(bool force_elim, app_ref_vector& vars, model& model, expr_ref_vector& fmls) {
+        TRACE("qe", 
+           tout << "mbp in " << vars << " " << fmls << "\n";
+           model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";
+        );
         expr_ref val(m), tmp(m);
         app_ref var(m);
         expr_ref_vector unused_fmls(m);
@@ -490,7 +498,7 @@ public:
             vars.reset();
         }
         fmls.append(unused_fmls);
-        TRACE("qe", tout << vars << " " << fmls << "\n";);
+        TRACE("qe", tout << "mbp out " << vars << " " << fmls << "\n";);
     }
     
 };

@@ -37,6 +37,8 @@ Notes:
 #include "smt_solver.h"
 #include "solver.h"
 #include "mus.h"
+#include"inc_sat_solver.h"
+
 
 namespace qe {
 
@@ -195,8 +197,8 @@ namespace qe {
             }
         }
         TRACE("qe", tout << "level: " << level << "\n";
-              model_v2_pp(tout, *mdl);
-              display(tout, asms););
+              model_v2_pp(tout << "model:\n", *mdl);
+              display(tout << "asms:\n", asms););
     }
     
     void pred_abs::set_expr_level(app* v, max_level const& lvl) {
@@ -513,9 +515,13 @@ namespace qe {
         ref<solver>  m_solver;
         
     public:
+        solver* mk_solver() {
+           return 1 ? mk_smt_solver(m, m_params, symbol::null) : mk_inc_sat_solver(m, m_params);
+        }
+
         kernel(ast_manager& m):
             m(m),
-            m_solver(mk_smt_solver(m, m_params, symbol::null))
+            m_solver(mk_solver())
         {
             m_params.set_bool("model", true);
             m_params.set_uint("relevancy_lvl", 0);
@@ -528,8 +534,9 @@ namespace qe {
         solver const& s() const { return *m_solver; }
 
         void reset() {
-            m_solver = mk_smt_solver(m, m_params, symbol::null);
+            m_solver = mk_solver();
         }
+
         void assert_expr(expr* e) {
             m_solver->assert_expr(e);
         }
@@ -584,6 +591,7 @@ namespace qe {
         lbool check_sat() {        
             while (true) {
                 ++m_stats.m_num_rounds;
+                TRACE("qe", tout << "(check-qsat level: " << m_level << " round: " << m_stats.m_num_rounds << ")\n";);
                 IF_VERBOSE(3, verbose_stream() << "(check-qsat level: " << m_level << " round: " << m_stats.m_num_rounds << ")\n";);
                 check_cancel();
                 expr_ref_vector asms(m_asms);
@@ -709,7 +717,8 @@ namespace qe {
             while (!vars.empty());
             SASSERT(m_vars.back().empty()); 
             initialize_levels();
-            TRACE("qe", tout << fml << "\n";);
+            //TRACE("qe", tout << fml << "\n";);
+            TRACE("qe", display(tout););
         }
 
         void filter_vars(app_ref_vector const& vars) {
@@ -778,10 +787,24 @@ namespace qe {
             }
         }
         
+        //for (unsigned i = 0; i < m_vars.size(); ++i) {
+        //    app_ref_vector& v = m_vars[i];
+        //    if (v.empty()) continue;
+        //    tout << (this->is_forall(i) ? 'A' : 'E') << "[";
+        //    for (unsigned i = 0; i < v.size(); ++i) tout << " " << mk_ismt2_pp(v[i].get(), m_m);
+        //    tout << std::endl;
+        //}
+
+
         void display(std::ostream& out) const {
-            out << "level: " << m_level << "\n";
+            out << "level: " << m_level << "("<< (is_forall(m_level) ? 'A' : 'E')<< ")\n";
             for (unsigned i = 0; i < m_vars.size(); ++i) {
-                out << m_vars[i] << "\n";
+//                out << (this->is_forall(i) ? 'A' : 'E') << "[" << m_vars[i] << "]\n";
+                tout << i << ": " << (is_forall(i) ? 'A' : 'E') << "[";
+                const app_ref_vector& v = m_vars[i];
+                for (unsigned i = 0; i < v.size(); ++i) tout << " " << mk_ismt2_pp(v[i], m);
+                tout << ']' << std::endl;
+
             }
             m_pred_abs.display(out);
         }
