@@ -221,7 +221,6 @@ class mbp::impl {
 
 
     void extract_bools(model& model, expr_ref_vector& fmls, expr* fml) {
-        TRACE("qe", tout << "extract bools: " << mk_pp(fml, m) << "\n";);
         ptr_vector<expr> todo;
         if (is_app(fml)) {
             todo.append(to_app(fml)->get_num_args(), to_app(fml)->get_args());
@@ -423,9 +422,6 @@ public:
     }
 
     void preprocess_solve(model& model, app_ref_vector& vars, expr_ref_vector& fmls) {
-        TRACE("qe",
-           tout << "preprocess_solve in " << vars << " " << fmls << "\n";
-           model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";);
         extract_literals(model, fmls);
         bool change = true;
         while (change && !vars.empty()) {
@@ -436,10 +432,10 @@ public:
                 }
             }
         }        
-        TRACE("qe", tout << "preprocess_solve out " << vars << " " << fmls << "\n";);
     }
 
     void operator()(bool force_elim, app_ref_vector& vars, model& model, expr_ref_vector& fmls) {
+        model_smt2_pp(std::cerr << "mbp model: \n", m, model, 2); std::cerr << ")\n";
         TRACE("qe", 
            tout << "mbp in " << vars << " " << fmls << "\n";
            model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";

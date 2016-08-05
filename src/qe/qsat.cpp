@@ -891,8 +891,8 @@ namespace qe {
             }
             
             pop(num_scopes); 
-            TRACE("qe", tout << "backtrack: " << num_scopes << " new level: " << m_level << "\nproject:\n" << core << "\n|->\n" << fml << "\n";);
             m_stats.m_num_bts++;
+            TRACE("qe", tout << "backtrack(" << m_stats.m_num_bts << "):"  << num_scopes << " new level: " << m_level << "\nproject:\n" << core << "\n|->\n" << fml << "\n";);            
             if (m_level == 0 && m_mode != qsat_sat) {
                 add_assumption(fml);
             }
@@ -1253,7 +1253,7 @@ namespace qe {
             m_ex.s().collect_statistics(st);        
             m_pred_abs.collect_statistics(st);
             st.update("qsat num rounds", m_stats.m_num_rounds); 
-            st.update("qsat num bts", m_stats.m_num_bts);
+            st.update("qsat num backtracks", m_stats.m_num_bts);
             m_pred_abs.collect_statistics(st);
         }
         

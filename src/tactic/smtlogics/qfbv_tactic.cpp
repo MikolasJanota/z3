@@ -29,6 +29,7 @@ Notes:
 #include"aig_tactic.h"
 #include"sat_tactic.h"
 #include"ackermannize_bv_tactic.h"
+#include"qsat.h"
 
 #define MEMLIMIT 300
 
@@ -134,4 +135,14 @@ tactic * mk_qfbv_tactic(ast_manager & m, params_ref const & p) {
 
     return mk_qfbv_tactic(m, p, new_sat, mk_smt_tactic());
 
+}
+
+
+
+tactic * mk_bv_qsat_tactic(ast_manager & m, params_ref const & p) {
+    tactic * new_sat = cond(mk_produce_proofs_probe(),
+        and_then(mk_simplify_tactic(m), mk_smt_tactic()),
+        mk_sat_tactic(m));
+
+    return mk_qfbv_tactic(m, p, new_sat, mk_qsat_tactic(m, p));
 }

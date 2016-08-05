@@ -25,8 +25,11 @@ class tactic;
 
 tactic * mk_qfbv_tactic(ast_manager & m, params_ref const & p = params_ref());
 
+tactic * mk_bv_qsat_tactic(ast_manager & m, params_ref const & p);
+
 /*
   ADD_TACTIC("qfbv",  "builtin strategy for solving QF_BV problems.", "mk_qfbv_tactic(m, p)")
+  ADD_TACTIC("bv_qsat",  "builtin strategy for solving QFV problems.", "mk_bv_qsat_tactic(m, p)")
 */
 
 tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p);
