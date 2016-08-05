@@ -559,6 +559,7 @@ namespace qe {
         
         struct stats {
             unsigned m_num_rounds;        
+            unsigned m_num_bts;
             stats() { reset(); }
             void reset() { memset(this, 0, sizeof(*this)); }
         };        
@@ -800,10 +801,10 @@ namespace qe {
             out << "level: " << m_level << "("<< (is_forall(m_level) ? 'A' : 'E')<< ")\n";
             for (unsigned i = 0; i < m_vars.size(); ++i) {
 //                out << (this->is_forall(i) ? 'A' : 'E') << "[" << m_vars[i] << "]\n";
-                tout << i << ": " << (is_forall(i) ? 'A' : 'E') << "[";
+                out << i << ": " << (is_forall(i) ? 'A' : 'E') << "[";
                 const app_ref_vector& v = m_vars[i];
-                for (unsigned i = 0; i < v.size(); ++i) tout << " " << mk_ismt2_pp(v[i], m);
-                tout << ']' << std::endl;
+                for (unsigned i = 0; i < v.size(); ++i) out << " " << mk_ismt2_pp(v[i], m);
+                out << ']' << std::endl;
 
             }
             m_pred_abs.display(out);
@@ -891,6 +892,7 @@ namespace qe {
             
             pop(num_scopes); 
             TRACE("qe", tout << "backtrack: " << num_scopes << " new level: " << m_level << "\nproject:\n" << core << "\n|->\n" << fml << "\n";);
+            m_stats.m_num_bts++;
             if (m_level == 0 && m_mode != qsat_sat) {
                 add_assumption(fml);
             }
@@ -1251,6 +1253,7 @@ namespace qe {
             m_ex.s().collect_statistics(st);        
             m_pred_abs.collect_statistics(st);
             st.update("qsat num rounds", m_stats.m_num_rounds); 
+            st.update("qsat num bts", m_stats.m_num_bts);
             m_pred_abs.collect_statistics(st);
         }
         

@@ -50,7 +50,8 @@ namespace qe {
         typedef nlsat::scoped_literal_vector clause;
 
         struct stats {
-            unsigned m_num_rounds;        
+            unsigned m_num_rounds;
+            unsigned m_num_bts;
             stats() { reset(); }
             void reset() { memset(this, 0, sizeof(*this)); }            
         };
@@ -841,6 +842,7 @@ namespace qe {
         void collect_statistics(statistics & st) const {
             st.copy(m_st);
             st.update("qsat num rounds", m_stats.m_num_rounds); 
+            st.update("qsat num bts", m_stats.m_num_bts);
         }
 
         void reset_statistics() {
