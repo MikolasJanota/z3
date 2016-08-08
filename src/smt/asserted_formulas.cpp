@@ -23,6 +23,7 @@ Revision History:
 #include"array_simplifier_plugin.h"
 #include"datatype_simplifier_plugin.h"
 #include"fpa_simplifier_plugin.h"
+#include"seq_simplifier_plugin.h"
 #include"bv_simplifier_plugin.h"
 #include"for_each_expr.h"
 #include"well_sorted.h"
@@ -54,8 +55,7 @@ asserted_formulas::asserted_formulas(ast_manager & m, smt_params & p):
     m_macro_manager(m, m_simplifier),
     m_bit2int(m),
     m_bv_sharing(m),
-    m_inconsistent(false),
-    m_cancel_flag(false) {
+    m_inconsistent(false){
 
     m_bsimp = 0;
     m_bvsimp = 0;
@@ -99,6 +99,7 @@ void asserted_formulas::setup_simplifier_plugins(simplifier & s, basic_simplifie
     s.register_plugin(bvsimp);
     s.register_plugin(alloc(datatype_simplifier_plugin, m_manager, *bsimp));    
     s.register_plugin(alloc(fpa_simplifier_plugin, m_manager, *bsimp));
+    s.register_plugin(alloc(seq_simplifier_plugin, m_manager, *bsimp));
 }
 
 void asserted_formulas::init(unsigned num_formulas, expr * const * formulas, proof * const * prs) {
@@ -223,9 +224,6 @@ void asserted_formulas::reset() {
     m_inconsistent = false;
 }
 
-void asserted_formulas::set_cancel_flag(bool f) {
-    m_cancel_flag = f; 
-}
 
 #ifdef Z3DEBUG
 bool asserted_formulas::check_well_sorted() const {
@@ -259,7 +257,7 @@ void asserted_formulas::reduce() {
     INVOKE(m_params.m_propagate_booleans, propagate_booleans());
     INVOKE(m_params.m_propagate_values, propagate_values());
     INVOKE(m_params.m_macro_finder && has_quantifiers(), find_macros());
-    INVOKE(m_params.m_nnf_cnf, nnf_cnf());
+    INVOKE(m_params.m_nnf_cnf || (m_params.m_mbqi && has_quantifiers()), nnf_cnf());
     INVOKE(m_params.m_eliminate_and, eliminate_and());
     INVOKE(m_params.m_pull_cheap_ite_trees, pull_cheap_ite_trees());
     INVOKE(m_params.m_pull_nested_quantifiers && has_quantifiers(), pull_nested_quantifiers());
@@ -799,13 +797,7 @@ MK_SIMPLIFIER(apply_bit2int, bit2int& functor = m_bit2int, "bit2int", "propagate
 
 MK_SIMPLIFIER(cheap_quant_fourier_motzkin, elim_bounds_star functor(m_manager), "elim_bounds", "cheap-fourier-motzkin", true);
 
-// MK_SIMPLIFIER(quant_elim, qe::expr_quant_elim_star1 &functor = m_quant_elim, 
-//              "quantifiers", "quantifier elimination procedures", true);
 
-bool asserted_formulas::quant_elim() {
-    throw default_exception("QUANT_ELIM option is deprecated, please consider using the 'qe' tactic.");
-    return false;
-}
 
 MK_SIMPLIFIER(elim_bvs_from_quantifiers, bv_elim_star functor(m_manager), "bv_elim", "eliminate-bit-vectors-from-quantifiers", true);
 

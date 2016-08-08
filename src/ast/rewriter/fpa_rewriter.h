@@ -80,17 +80,16 @@ public:
     br_status mk_rm(expr * arg, expr_ref & result);
     br_status mk_to_fp(parameter const& p1, parameter const& p2, unsigned num_args, expr * const * args, expr_ref & result);
     br_status mk_to_fp_unsigned(parameter const& p1, parameter const& p2, expr * arg1, expr * arg2, expr_ref & result);
-    br_status mk_fp(expr * arg1, expr * arg2, expr * arg3, expr_ref & result);
+    br_status mk_fp(expr * sgn, expr * exp, expr * sig, expr_ref & result);
     br_status mk_to_fp_unsigned(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_to_ubv(parameter const& p, expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_to_sbv(parameter const& p, expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_to_ieee_bv(parameter const& p, expr * arg, expr_ref & result);
     br_status mk_to_real(expr * arg, expr_ref & result);
 
-    br_status mk_to_ubv_unspecified(parameter const& p, expr_ref & result);
-    br_status mk_to_sbv_unspecified(parameter const& p, expr_ref & result);
-    br_status mk_to_ieee_bv_unspecified(parameter const& p, expr_ref & result);
-    br_status mk_to_real_unspecified(expr_ref & result);
+    br_status mk_to_ubv_unspecified(unsigned ebits, unsigned sbits, unsigned with, expr_ref & result);
+    br_status mk_to_sbv_unspecified(unsigned ebits, unsigned sbits, unsigned with, expr_ref & result);
+    br_status mk_to_real_unspecified(unsigned ebits, unsigned sbits, expr_ref & result);
 };
 
 #endif

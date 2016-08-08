@@ -26,6 +26,7 @@ Notes:
 #include"fpa_rewriter.h"
 #include"dl_rewriter.h"
 #include"pb_rewriter.h"
+#include"seq_rewriter.h"
 #include"rewriter_def.h"
 #include"expr_substitution.h"
 #include"ast_smt2_pp.h"
@@ -43,6 +44,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     fpa_rewriter        m_f_rw;
     dl_rewriter         m_dl_rw;
     pb_rewriter         m_pb_rw;
+    seq_rewriter        m_seq_rw;
     arith_util          m_a_util;
     bv_util             m_bv_util;
     unsigned long long  m_max_memory; // in bytes
@@ -76,6 +78,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_bv_rw.updt_params(p);
         m_ar_rw.updt_params(p);
         m_f_rw.updt_params(p);
+        m_seq_rw.updt_params(p);
         updt_local_params(p);
     }
 
@@ -181,6 +184,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                     st = m_f_rw.mk_eq_core(args[0], args[1], result);
                 else if (s_fid == m_ar_rw.get_fid())
                     st = m_ar_rw.mk_eq_core(args[0], args[1], result);
+                else if (s_fid == m_seq_rw.get_fid())
+                    st = m_seq_rw.mk_eq_core(args[0], args[1], result);
                 
                 if (st != BR_FAILED)
                     return st;
@@ -208,6 +213,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             return m_dl_rw.mk_app_core(fid, k, num, args, np, params, result);
         if (fid == m_pb_rw.get_fid())
             return m_pb_rw.mk_app_core(fid, k, num, args, np, params, result);
+        if (fid == m_seq_rw.get_fid())
+            return m_seq_rw.mk_app_core(fid, k, num, args, result);
         return BR_FAILED;
     }
 
@@ -597,6 +604,14 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         return st;
     }
 
+    expr_ref mk_app(func_decl* f, unsigned num_args, expr* const* args) {
+        expr_ref result(m());
+        proof_ref pr(m());
+        if (BR_FAILED == reduce_app(f, num_args, args, result, pr)) {
+            result = m().mk_app(f, num_args, args);
+        }
+        return result;
+    }
 
 
     bool reduce_quantifier(quantifier * old_q, 
@@ -678,6 +693,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_f_rw(m, p),
         m_dl_rw(m),
         m_pb_rw(m),
+        m_seq_rw(m),
         m_a_util(m),
         m_bv_util(m),
         m_used_dependencies(m),
@@ -705,9 +721,6 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         return false;
     }
 
-    void set_cancel(bool f) {
-        m_a_rw.set_cancel(f);
-    }
 };
 
 template class rewriter_tpl<th_rewriter_cfg>;
@@ -717,6 +730,9 @@ struct th_rewriter::imp : public rewriter_tpl<th_rewriter_cfg> {
     imp(ast_manager & m, params_ref const & p):
         rewriter_tpl<th_rewriter_cfg>(m, m.proofs_enabled(), m_cfg),
         m_cfg(m, p) {
+    }
+    expr_ref mk_app(func_decl* f, unsigned sz, expr* const* args) {
+        return m_cfg.mk_app(f, sz, args);
     }
 };
 
@@ -754,21 +770,11 @@ unsigned th_rewriter::get_num_steps() const {
     return m_imp->get_num_steps();
 }
 
-void th_rewriter::set_cancel(bool f) {
-    #pragma omp critical (th_rewriter)
-    {
-        m_imp->set_cancel(f);
-        m_imp->cfg().set_cancel(f);
-    }
-}
 
 void th_rewriter::cleanup() {
     ast_manager & m = m_imp->m();
-    #pragma omp critical (th_rewriter)
-    {
-        dealloc(m_imp);
-        m_imp = alloc(imp, m, m_params);
-    }
+    dealloc(m_imp);
+    m_imp = alloc(imp, m, m_params);    
 }
 
 void th_rewriter::reset() {
@@ -818,4 +824,8 @@ void th_rewriter::reset_used_dependencies() {
         set_substitution(m_imp->cfg().m_subst); // reset cache preserving subst
         m_imp->cfg().m_used_dependencies = 0;
     }
+}
+
+expr_ref th_rewriter::mk_app(func_decl* f, unsigned num_args, expr* const* args) {
+    return m_imp->mk_app(f, num_args, args);
 }

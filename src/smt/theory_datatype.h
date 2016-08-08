@@ -74,7 +74,7 @@ namespace smt {
         void sign_recognizer_conflict(enode * c, enode * r);
 
         ptr_vector<enode>    m_to_unmark;
-        svector<enode_pair>  m_used_eqs;
+        enode_pair_vector    m_used_eqs;
         enode *              m_main;
         bool occurs_check(enode * n);
         bool occurs_check_core(enode * n);
@@ -111,6 +111,8 @@ namespace smt {
         static void after_merge_eh(theory_var r1, theory_var r2, theory_var v1, theory_var v2) {}
         void unmerge_eh(theory_var v1, theory_var v2);
         virtual char const * get_name() const { return "datatype"; }
+        virtual bool include_func_interp(func_decl* f);
+
     };
 
 };

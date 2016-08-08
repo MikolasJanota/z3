@@ -336,7 +336,6 @@ namespace pdr {
         unsigned             m_expanded_lvl;
         ptr_vector<core_generalizer>  m_core_generalizers;
         stats                m_stats;
-        volatile bool        m_cancel;
         model_converter_ref  m_mc;
         proof_converter_ref  m_pc;
         
@@ -350,10 +349,10 @@ namespace pdr {
         lbool expand_state(model_node& n, expr_ref_vector& cube, bool& uses_level);
         void create_children(model_node& n);
         expr_ref mk_sat_answer() const;
-        expr_ref mk_unsat_answer() const;
+        expr_ref mk_unsat_answer();
         
         // Generate inductive property
-        void get_level_property(unsigned lvl, expr_ref_vector& res, vector<relation_info> & rs) const;
+        void get_level_property(unsigned lvl, expr_ref_vector& res, vector<relation_info> & rs);
 
 
         // Initialization
@@ -407,13 +406,10 @@ namespace pdr {
 
         std::ostream& display(std::ostream& strm) const;        
 
-        void display_certificate(std::ostream& strm) const;
+        void display_certificate(std::ostream& strm);
 
         lbool solve();
 
-        void cancel();
-
-        void cleanup();
 
         void reset();
 

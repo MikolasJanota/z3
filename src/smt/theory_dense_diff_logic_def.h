@@ -597,7 +597,7 @@ namespace smt {
             ctx.set_conflict(ctx.mk_justification(theory_conflict_justification(get_id(), r, antecedents.size(), antecedents.c_ptr())));
 
             if (dump_lemmas()) {
-                ctx.display_lemma_as_smt_problem(antecedents.size(), antecedents.c_ptr(), false_literal, "");
+                ctx.display_lemma_as_smt_problem(antecedents.size(), antecedents.c_ptr(), false_literal);
             }
 
             return;
@@ -896,8 +896,8 @@ namespace smt {
     template<typename Ext>
     inf_eps_rational<inf_rational> theory_dense_diff_logic<Ext>::maximize(theory_var v, expr_ref& blocker, bool& has_shared) {
         typedef simplex::simplex<simplex::mpq_ext> Simplex;
-        Simplex S;
         ast_manager& m = get_manager();
+        Simplex S(m.limit());
         objective_term const& objective = m_objectives[v];
         has_shared = false;
         

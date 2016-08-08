@@ -33,6 +33,8 @@ Revision History:
 #include"smt2parser.h"
 #include"q2.h"
 #include <strstream>
+#include"cooperate.h"
+
 #define RUN_EXT 0
 using std::endl;
 
@@ -308,6 +310,8 @@ class q2 : public q2_solver {
               , ex_decls(m)
               , simp(m)
               , cands(m, p, mode==UFBV, free_decls)
+              , iterations (0)
+              , m_cancel(false)
 
     {}
 
@@ -323,6 +327,24 @@ class q2 : public q2_solver {
             if (!ok) return l_undef;
             return cegar();
         }
+
+        virtual unsigned get_iteration_count() { return iterations;  }
+
+        //
+        //  timeout mechanisms
+        //
+        void checkpoint() {
+            if (m_cancel)
+                throw tactic_exception(TACTIC_CANCELED_MSG);
+            cooperate("lackr");
+        }
+
+        virtual void set_cancel(bool f) {
+            //#pragma omp critical (lackr_cancel)
+            {
+                m_cancel = f;
+            }
+        }
     private:
         ast_manager& m;
         params_ref p;
@@ -335,6 +357,10 @@ class q2 : public q2_solver {
 
         CandWrap cands;
         ptr_vector<CexWrap>  cexs; // Maintain a counter-example generator for each formula (A X. F)
+
+        unsigned iterations;
+
+        volatile bool                        m_cancel;
 
         bool init() {
             decl_collector dc(m);
@@ -413,9 +439,10 @@ class q2 : public q2_solver {
         }
 
         lbool cegar() {
-            int count = 0;
+            iterations = 0;
             while (1) {
-                std::cout << "it: " << ++count << endl;
+                checkpoint();
+                std::cout << "it: " << ++iterations << endl;
                 ////////////
                 const lbool sat_res = cands(); // get cand
                 TRACE("q2", tout << "cand_res: " << sat_res << endl;);

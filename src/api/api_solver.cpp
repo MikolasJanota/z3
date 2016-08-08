@@ -153,6 +153,11 @@ extern "C" {
         LOG_Z3_solver_set_params(c, s, p);
         RESET_ERROR_CODE();
 
+        symbol logic = to_param_ref(p).get_sym("smt.logic", symbol::null);
+        if (logic != symbol::null) {
+            to_solver(s)->m_logic = logic;
+        }
+
         if (to_solver(s)->m_solver) {
             bool old_model = to_solver(s)->m_params.get_bool("model", true);
             bool new_model = to_param_ref(p).get_bool("model", true);
@@ -271,7 +276,7 @@ extern "C" {
         unsigned timeout     = to_solver(s)->m_params.get_uint("timeout", mk_c(c)->get_timeout());
         unsigned rlimit      = to_solver(s)->m_params.get_uint("rlimit", mk_c(c)->get_rlimit());
         bool     use_ctrl_c  = to_solver(s)->m_params.get_bool("ctrl_c", false);
-        cancel_eh<solver> eh(*to_solver_ref(s));
+        cancel_eh<reslimit> eh(mk_c(c)->m().limit());
         api::context::set_interruptable si(*(mk_c(c)), eh);
         lbool result;
         {

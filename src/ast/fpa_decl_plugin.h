@@ -24,7 +24,7 @@ Revision History:
 #include"arith_decl_plugin.h"
 #include"bv_decl_plugin.h"
 #include"mpf.h"
- 
+
 enum fpa_sort_kind {
     FLOATING_POINT_SORT,
     ROUNDING_MODE_SORT,
@@ -89,16 +89,16 @@ enum fpa_op_kind {
     /* Internal use only */
     OP_FPA_INTERNAL_RM, // Internal conversion from (_ BitVec 3) to RoundingMode
     OP_FPA_INTERNAL_BVWRAP,
-    OP_FPA_INTERNAL_BVUNWRAP,    
-    
+    OP_FPA_INTERNAL_BVUNWRAP,
+
     OP_FPA_INTERNAL_MIN_I,
     OP_FPA_INTERNAL_MAX_I,
     OP_FPA_INTERNAL_MIN_UNSPECIFIED,
     OP_FPA_INTERNAL_MAX_UNSPECIFIED,
     OP_FPA_INTERNAL_TO_UBV_UNSPECIFIED,
-    OP_FPA_INTERNAL_TO_SBV_UNSPECIFIED,    
+    OP_FPA_INTERNAL_TO_SBV_UNSPECIFIED,
     OP_FPA_INTERNAL_TO_IEEE_BV_UNSPECIFIED,
-    OP_FPA_INTERNAL_TO_REAL_UNSPECIFIED,    
+    OP_FPA_INTERNAL_TO_REAL_UNSPECIFIED,
 
     LAST_FLOAT_OP
 };
@@ -115,7 +115,7 @@ class fpa_decl_plugin : public decl_plugin {
         mpf_eq_proc(scoped_mpf_vector const & values):m_values(values) {}
         bool operator()(unsigned id1, unsigned id2) const { return m_values.m().eq_core(m_values[id1], m_values[id2]); }
     };
-    
+
     typedef chashtable<unsigned, mpf_hash_proc, mpf_eq_proc> value_table;
 
 
@@ -149,7 +149,7 @@ class fpa_decl_plugin : public decl_plugin {
     func_decl * mk_rm_unary_decl(decl_kind k, unsigned num_parameters, parameter const * parameters,
                                  unsigned arity, sort * const * domain, sort * range);
     func_decl * mk_fma(decl_kind k, unsigned num_parameters, parameter const * parameters,
-                       unsigned arity, sort * const * domain, sort * range);    
+                       unsigned arity, sort * const * domain, sort * range);
     func_decl * mk_fp(decl_kind k, unsigned num_parameters, parameter const * parameters,
                       unsigned arity, sort * const * domain, sort * range);
     func_decl * mk_to_fp(decl_kind k, unsigned num_parameters, parameter const * parameters,
@@ -177,30 +177,48 @@ class fpa_decl_plugin : public decl_plugin {
                                                unsigned arity, sort * const * domain, sort * range);
     func_decl * mk_internal_to_real_unspecified(decl_kind k, unsigned num_parameters, parameter const * parameters,
                                                 unsigned arity, sort * const * domain, sort * range);
+    func_decl * mk_internal_to_ieee_bv_unspecified(decl_kind k, unsigned num_parameters, parameter const * parameters,
+                                                   unsigned arity, sort * const * domain, sort * range);
 
     virtual void set_manager(ast_manager * m, family_id id);
     unsigned mk_id(mpf const & v);
     void recycled_id(unsigned id);
 
+    virtual bool is_considered_uninterpreted(func_decl * f) {
+        if (f->get_family_id() != get_family_id())
+            return false;
+        switch (f->get_decl_kind())
+        {
+        case OP_FPA_INTERNAL_TO_UBV_UNSPECIFIED:
+        case OP_FPA_INTERNAL_TO_SBV_UNSPECIFIED:
+        case OP_FPA_INTERNAL_TO_REAL_UNSPECIFIED:
+        case OP_FPA_INTERNAL_TO_IEEE_BV_UNSPECIFIED:
+            return true;
+        default:
+            return false;
+        }
+        return false;
+    }
+
 public:
     fpa_decl_plugin();
-    
+
     bool is_float_sort(sort * s) const { return is_sort_of(s, m_family_id, FLOATING_POINT_SORT); }
     bool is_rm_sort(sort * s) const { return is_sort_of(s, m_family_id, ROUNDING_MODE_SORT); }
 
     virtual ~fpa_decl_plugin();
     virtual void finalize();
-    
+
     virtual decl_plugin * mk_fresh();
     virtual sort * mk_sort(decl_kind k, unsigned num_parameters, parameter const * parameters);
-    virtual func_decl * mk_func_decl(decl_kind k, unsigned num_parameters, parameter const * parameters, 
+    virtual func_decl * mk_func_decl(decl_kind k, unsigned num_parameters, parameter const * parameters,
                                      unsigned arity, sort * const * domain, sort * range);
     virtual void get_op_names(svector<builtin_name> & op_names, symbol const & logic);
     virtual void get_sort_names(svector<builtin_name> & sort_names, symbol const & logic);
     virtual expr * get_some_value(sort * s);
     virtual bool is_value(app* e) const;
     virtual bool is_unique_value(app* e) const;
-    
+
     mpf_manager & fm() { return m_fm; }
     func_decl * mk_numeral_decl(mpf const & v);
     app * mk_numeral(mpf const & v);
@@ -209,7 +227,7 @@ public:
     bool is_rm_numeral(expr * n, mpf_rounding_mode & val);
     bool is_rm_numeral(expr * n);
 
-    mpf const & get_value(unsigned id) const { 
+    mpf const & get_value(unsigned id) const {
         SASSERT(m_value_table.contains(id));
         return m_values[id];
     }
@@ -222,7 +240,7 @@ class fpa_util {
     ast_manager     & m_manager;
     fpa_decl_plugin * m_plugin;
     family_id         m_fid;
-    arith_util        m_a_util;    
+    arith_util        m_a_util;
     bv_util           m_bv_util;
 
 public:
@@ -269,29 +287,29 @@ public:
     app * mk_pzero(sort * s) { return mk_pzero(get_ebits(s), get_sbits(s)); }
     app * mk_nzero(sort * s) { return mk_nzero(get_ebits(s), get_sbits(s)); }
 
-    bool is_nan(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_nan(v); } 
+    bool is_nan(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_nan(v); }
     bool is_pinf(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_pinf(v); }
     bool is_ninf(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_ninf(v); }
     bool is_zero(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_zero(v); }
     bool is_pzero(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_pzero(v); }
     bool is_nzero(expr * n) { scoped_mpf v(fm()); return is_numeral(n, v) && fm().is_nzero(v); }
-       
-    app * mk_fp(expr * arg1, expr * arg2, expr * arg3) { return m().mk_app(m_fid, OP_FPA_FP, arg1, arg2, arg3); }
+
+    app * mk_fp(expr * sgn, expr * exp, expr * sig) { return m().mk_app(m_fid, OP_FPA_FP, sgn, exp, sig); }
     app * mk_to_fp(sort * s, expr * bv_t) {
         SASSERT(is_float(s) && s->get_num_parameters() == 2);
-        return m().mk_app(m_fid, OP_FPA_TO_FP, 2, s->get_parameters(), 1, &bv_t); 
+        return m().mk_app(m_fid, OP_FPA_TO_FP, 2, s->get_parameters(), 1, &bv_t);
     }
-    app * mk_to_fp(sort * s, expr * rm, expr * t) { 
+    app * mk_to_fp(sort * s, expr * rm, expr * t) {
         SASSERT(is_float(s) && s->get_num_parameters() == 2);
         expr * args[] = { rm, t };
         return m().mk_app(m_fid, OP_FPA_TO_FP, 2, s->get_parameters(), 2, args);
     }
-    app * mk_to_fp(sort * s, expr * rm, expr * sig, expr * exp) {
+    app * mk_to_fp(sort * s, expr * rm, expr * exp, expr * sig) {
         SASSERT(is_float(s) && s->get_num_parameters() == 2);
-        expr * args[] = { rm, sig, exp };
+        expr * args[] = { rm, exp, sig};
         return m().mk_app(m_fid, OP_FPA_TO_FP, 2, s->get_parameters(), 3, args);
     }
-    app * mk_to_fp_unsigned(sort * s, expr * rm, expr * t) { 
+    app * mk_to_fp_unsigned(sort * s, expr * rm, expr * t) {
         SASSERT(is_float(s) && s->get_num_parameters() == 2);
         expr * args[] = { rm, t };
         return m().mk_app(m_fid, OP_FPA_TO_FP_UNSIGNED, 2, s->get_parameters(), 2, args);
@@ -299,11 +317,11 @@ public:
 
     bool is_to_fp(expr * n) { return is_app_of(n, m_fid, OP_FPA_TO_FP); }
 
-    app * mk_to_ubv(expr * rm, expr * t, unsigned sz) {         
+    app * mk_to_ubv(expr * rm, expr * t, unsigned sz) {
         parameter ps[] = { parameter(sz) };
         expr * args[] = { rm, t };
         return m().mk_app(m_fid, OP_FPA_TO_UBV, 1, ps, 2, args); }
-    app * mk_to_sbv(expr * rm, expr * t, unsigned sz) { 
+    app * mk_to_sbv(expr * rm, expr * t, unsigned sz) {
         parameter ps[] = { parameter(sz) };
         expr * args[] = { rm, t };
         return m().mk_app(m_fid, OP_FPA_TO_SBV, 1, ps, 2, args);
@@ -336,7 +354,7 @@ public:
     app * mk_is_inf(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_INF, arg1); }
     app * mk_is_zero(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_ZERO, arg1); }
     app * mk_is_normal(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_NORMAL, arg1); }
-    app * mk_is_subnormal(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_SUBNORMAL, arg1); }    
+    app * mk_is_subnormal(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_SUBNORMAL, arg1); }
     app * mk_is_positive(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_POSITIVE, arg1); }
     app * mk_is_negative(expr * arg1) { return m().mk_app(m_fid, OP_FPA_IS_NEGATIVE, arg1); }
 
@@ -344,10 +362,10 @@ public:
 
     app * mk_to_ieee_bv(expr * arg1) { return m().mk_app(m_fid, OP_FPA_TO_IEEE_BV, arg1); }
 
-    app * mk_internal_to_ubv_unspecified(unsigned width);
-    app * mk_internal_to_sbv_unspecified(unsigned width);
-    app * mk_internal_to_ieee_bv_unspecified(unsigned width);
-    app * mk_internal_to_real_unspecified();
+    app * mk_internal_to_ubv_unspecified(unsigned ebits, unsigned sbits, unsigned width);
+    app * mk_internal_to_sbv_unspecified(unsigned ebits, unsigned sbits, unsigned width);
+    app * mk_internal_to_ieee_bv_unspecified(unsigned ebits, unsigned sbits);
+    app * mk_internal_to_real_unspecified(unsigned ebits, unsigned sbits);
 
     bool is_wrap(expr * e) const { return is_app_of(e, get_family_id(), OP_FPA_INTERNAL_BVWRAP); }
     bool is_unwrap(expr * e) const { return is_app_of(e, get_family_id(), OP_FPA_INTERNAL_BVUNWRAP); }

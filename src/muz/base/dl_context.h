@@ -209,7 +209,6 @@ namespace datalog {
         execution_result   m_last_status;
         expr_ref           m_last_answer;
         DL_ENGINE          m_engine_type;
-        volatile bool      m_cancel;
 
 
 
@@ -487,11 +486,11 @@ namespace datalog {
         //
         // -----------------------------------
 
-        void cancel();
-        bool canceled() const { return m_cancel; }
+        bool canceled() {
+            return m.canceled() && (m_last_status = CANCELED, true);
+        }
 
         void cleanup();
-        void reset_cancel() { cleanup(); }
 
         /**
            \brief check if query 'q' is satisfied under asserted rules and background.
@@ -582,6 +581,9 @@ namespace datalog {
         //undefined and private copy constructor and operator=
         context(const context&);
         context& operator=(const context&);
+
+        bool is_query(expr* e);
+        void display_rel_decl(std::ostream& out, func_decl* f);
     };
 
 };

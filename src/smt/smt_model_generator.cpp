@@ -49,7 +49,7 @@ namespace smt {
     void model_generator::init_model() {
         SASSERT(!m_model);
         // PARAM-TODO smt_params ---> params_ref
-        m_model = alloc(proto_model, m_manager, m_context->get_simplifier()); // , m_context->get_fparams());
+        m_model = alloc(proto_model, m_manager); // , m_context->get_fparams());
         ptr_vector<theory>::const_iterator it  = m_context->begin_theories();
         ptr_vector<theory>::const_iterator end = m_context->end_theories();
         for (; it != end; ++it) {
@@ -90,8 +90,9 @@ namespace smt {
                 sort * s      = m_manager.get_sort(r->get_owner());
                 model_value_proc * proc = 0;
                 if (m_manager.is_bool(s)) {
-                    TRACE("model_bug", tout << mk_pp(r->get_owner(), m_manager) << "\n";);
-                    SASSERT(m_context->get_assignment(r) == l_true || m_context->get_assignment(r) == l_false);
+                    CTRACE("func_interp_bug", m_context->get_assignment(r) == l_undef, 
+                           tout << mk_pp(r->get_owner(), m_manager) << "\n";);
+                    SASSERT(m_context->get_assignment(r) != l_undef);
                     if (m_context->get_assignment(r) == l_true)
                         proc = alloc(expr_wrapper_proc, m_manager.mk_true());
                     else
@@ -360,6 +361,7 @@ namespace smt {
                     }
                     else {
                         enode * child = d.get_enode();
+                        TRACE("mg_top_sort", tout << "#" << n->get_owner_id() << " (" << mk_pp(n->get_owner(), m_manager) << "): " << mk_pp(child->get_owner(), m_manager) << " " << mk_pp(child->get_root()->get_owner(), m_manager) << "\n";);
                         child = child->get_root();
                         app * val = 0;
                         m_root2value.find(child, val);
@@ -513,43 +515,6 @@ namespace smt {
             m_model->register_decl(f, fi);
         }
     }
-
-    /**
-       \brief Auxiliary functor for method register_indirect_elim_decls.
-    */
-    class mk_interp_proc {
-        context &       m_context;
-        proto_model &   m_model;
-    public:
-        mk_interp_proc(context & ctx, proto_model & m):
-            m_context(ctx), 
-            m_model(m) {
-        }
-
-        void operator()(var * n) { 
-        }
-
-        void operator()(app * n) { 
-            if (!is_uninterp(n))
-                return; // n is interpreted
-            func_decl * d  = n->get_decl();
-            if (m_model.has_interpretation(d))
-                return; // declaration already has an interpretation.
-            if (n->get_num_args() == 0) {
-                sort * r = d->get_range();
-                expr * v = m_model.get_some_value(r);
-                m_model.register_decl(d, v);
-            }
-            else {
-                func_interp * fi = alloc(func_interp, m_context.get_manager(), d->get_arity());            
-                m_model.register_decl(d, fi);
-            }
-        }
-        
-        void operator()(quantifier * n) { 
-        }
-        
-    };
 
     proto_model * model_generator::mk_model() {
         SASSERT(!m_model);

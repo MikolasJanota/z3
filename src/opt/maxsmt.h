@@ -44,7 +44,6 @@ namespace opt {
         virtual rational get_lower() const = 0;
         virtual rational get_upper() const = 0;
         virtual bool get_assignment(unsigned index) const = 0;
-        virtual void set_cancel(bool f) = 0;
         virtual void collect_statistics(statistics& st) const = 0;
         virtual void get_model(model_ref& mdl, svector<symbol>& labels) = 0;
         virtual void updt_params(params_ref& p) = 0;
@@ -60,7 +59,6 @@ namespace opt {
     protected:
         ast_manager&     m;
         maxsat_context&  m_c;
-        volatile bool    m_cancel;
         const expr_ref_vector  m_soft;
         vector<rational> m_weights;
         expr_ref_vector  m_assertions;
@@ -78,14 +76,13 @@ namespace opt {
         virtual rational get_lower() const { return m_lower; }
         virtual rational get_upper() const { return m_upper; }
         virtual bool get_assignment(unsigned index) const { return m_assignment[index]; }
-        virtual void set_cancel(bool f) { m_cancel = f; if (f) s().cancel(); else s().reset_cancel(); }
         virtual void collect_statistics(statistics& st) const { }
         virtual void get_model(model_ref& mdl, svector<symbol>& labels) { mdl = m_model.get(); labels = m_labels;}
         virtual void commit_assignment();
         void set_model() { s().get_model(m_model); s().get_labels(m_labels); }
         virtual void updt_params(params_ref& p);
         solver& s();
-        void init();
+        bool init();
         void set_mus(bool f);
         app* mk_fresh_bool(char const* name);
 
@@ -114,8 +111,8 @@ namespace opt {
     class maxsmt {
         ast_manager&              m;
         maxsat_context&           m_c;
+        unsigned                  m_index;
         scoped_ptr<maxsmt_solver_base> m_msolver;
-        volatile bool    m_cancel;
         expr_ref_vector  m_soft_constraints;
         expr_ref_vector  m_answer;
         vector<rational> m_weights;
@@ -126,12 +123,11 @@ namespace opt {
         svector<symbol>  m_labels;
         params_ref       m_params;
     public:
-        maxsmt(maxsat_context& c);
+        maxsmt(maxsat_context& c, unsigned id);
         lbool operator()();
-        void set_cancel(bool f);
         void updt_params(params_ref& p);
         void add(expr* f, rational const& w); 
-        void set_adjust_value(adjust_value& adj) { m_adjust_value = adj; }
+        void set_adjust_value(adjust_value& adj);
         unsigned size() const { return m_soft_constraints.size(); }
         expr* operator[](unsigned idx) const { return m_soft_constraints[idx]; }
         rational weight(unsigned idx) const { return m_weights[idx]; }

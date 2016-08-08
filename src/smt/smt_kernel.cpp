@@ -123,6 +123,10 @@ namespace smt {
             return m_kernel.last_failure_as_string();
         }
 
+        void set_reason_unknown(char const* msg) {
+            m_kernel.set_reason_unknown(msg);
+        }
+
         void get_assignments(expr_ref_vector & result) {
             m_kernel.get_assignments(result);
         }
@@ -168,10 +172,6 @@ namespace smt {
         
         void display_istatistics(std::ostream & out) const {
             m_kernel.display_istatistics(out);
-        }
-
-        void set_cancel(bool f) {
-            m_kernel.set_cancel_flag(f);
         }
         
         bool canceled() {
@@ -288,6 +288,10 @@ namespace smt {
         return m_imp->last_failure_as_string();
     }
 
+    void kernel::set_reason_unknown(char const* msg) {
+        m_imp->set_reason_unknown(msg);
+    }
+
     void kernel::get_assignments(expr_ref_vector & result) {
         m_imp->get_assignments(result);
     }
@@ -326,14 +330,6 @@ namespace smt {
 
     void kernel::display_istatistics(std::ostream & out) const {
         m_imp->display_istatistics(out);
-    }
-
-    void kernel::set_cancel(bool f) {
-        #pragma omp critical (smt_kernel)
-        {
-            if (m_imp)
-                m_imp->set_cancel(f);
-        }
     }
 
     bool kernel::canceled() const {

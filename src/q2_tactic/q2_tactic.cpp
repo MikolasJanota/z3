@@ -176,6 +176,7 @@ public:
         // Running implementation
         scoped_ptr<q2_solver> i = mk_q2_solver(m, m_p, flas);
         const lbool o = (*i)();
+        iterations += i->get_iteration_count();
         flas.reset();
         flas_refs.reset();
         // Report result
@@ -190,9 +191,18 @@ public:
     virtual tactic* translate(ast_manager& m) {
         return alloc(q2_tactic, m, m_p);
     }
+
+    virtual void collect_statistics(statistics & st) const {
+        st.update("q2 iterations", iterations);
+    }
+
+    virtual void reset_statistics() {
+        iterations = 0;
+    }
 private:
     ast_manager& m_m;
     params_ref m_p;
+    unsigned iterations;
 };
 
 tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {

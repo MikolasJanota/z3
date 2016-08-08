@@ -23,6 +23,7 @@ Revision History:
 class q2_solver {
 public:
     virtual lbool operator() () = 0;
+    virtual unsigned get_iteration_count() = 0;
 };
 
 q2_solver* mk_q2_solver(ast_manager& m, params_ref p, const ptr_vector<expr>& fmls);

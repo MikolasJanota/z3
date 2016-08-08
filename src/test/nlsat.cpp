@@ -23,6 +23,7 @@ Notes:
 #include"util.h"
 #include"nlsat_explain.h"
 #include"polynomial_cache.h"
+#include"rlimit.h"
 
 nlsat::interval_set_ref tst_interval(nlsat::interval_set_ref const & s1,
                                      nlsat::interval_set_ref const & s2,
@@ -58,8 +59,9 @@ nlsat::interval_set_ref tst_interval(nlsat::interval_set_ref const & s1,
 
 static void tst3() {
     enable_trace("nlsat_interval");
+    reslimit rl;
     unsynch_mpq_manager         qm;
-    anum_manager                am(qm);
+    anum_manager                am(rl, qm);
     small_object_allocator      allocator;
     nlsat::interval_set_manager ism(am, allocator);
 
@@ -71,13 +73,13 @@ static void tst3() {
     am.set(m_sqrt2, sqrt2);
     am.neg(m_sqrt2);
     am.set(three, 3);
-    
+
     nlsat::literal p1(1, false);
     nlsat::literal p2(2, false);
     nlsat::literal p3(3, false);
     nlsat::literal p4(4, false);
     nlsat::literal np2(2, true);
-    
+
     nlsat::interval_set_ref s1(ism), s2(ism), s3(ism), s4(ism);
     s1 = ism.mk_empty();
     std::cout << "s1: " << s1 << "\n";
@@ -95,7 +97,7 @@ static void tst3() {
     s2 = ism.mk(false, false, zero, false, false, two, p2);
     tst_interval(s1, s2, 1);
 
-    // Case 
+    // Case
     // s1:   [ ... ]
     // s2: [ ... ]
     s1 = ism.mk(false, false, zero, false, false, two, p1);
@@ -103,28 +105,28 @@ static void tst3() {
     s3 = ism.mk_union(s1, s2);
     tst_interval(s1, s2, 2);
 
-    // Case 
+    // Case
     // s1:   [ ... ]
     // s2:      [ ... ]
     s1 = ism.mk(false, false, m_sqrt2, false, false, one, p1);
     s2 = ism.mk(false, false, zero, false, false, two, p2);
     tst_interval(s1, s2, 2);
 
-    // Case 
+    // Case
     // s1:   [ ... ]
     // s2:            [ ... ]
     s1 = ism.mk(false, false, m_sqrt2, false, false, one, p1);
     s2 = ism.mk(false, false, two, false, false, three, p2);
     tst_interval(s1, s2, 2);
 
-    // Case 
+    // Case
     // s1:   [    ...    ]
     // s2:      [ ... ]
     s1 = ism.mk(false, false, m_sqrt2, false, false, three, p1);
     s2 = ism.mk(false, false, zero, false, false, two, p2);
     tst_interval(s1, s2, 1);
 
-    // Case 
+    // Case
     // s1:   [    ...      ]
     // s2:      [ ... ] [  ...  ]
     s1 = ism.mk(false, false, m_two, false, false, two, p1);
@@ -215,7 +217,7 @@ static nlsat::interval_set_ref mk_random(nlsat::interval_set_manager & ism, anum
     return r;
 }
 
-static void check_subset_result(nlsat::interval_set_ref const & s1, 
+static void check_subset_result(nlsat::interval_set_ref const & s1,
                                 nlsat::interval_set_ref const & s2,
                                 nlsat::interval_set_ref const & r,
                                 nlsat::literal l1,
@@ -242,15 +244,16 @@ static void check_subset_result(nlsat::interval_set_ref const & s1,
 
 static void tst4() {
     enable_trace("nlsat_interval");
+    reslimit rl;
     unsynch_mpq_manager         qm;
-    anum_manager                am(qm);
+    anum_manager                am(rl, qm);
     small_object_allocator      allocator;
     nlsat::interval_set_manager ism(am, allocator);
     nlsat::interval_set_ref     s1(ism), s2(ism), r(ism);
 
     nlsat::literal l1(1, false);
     nlsat::literal l2(2, false);
-    
+
     for (unsigned i = 0; i < 100; i++) {
         s1 = mk_random(ism, am, 20, 3, 10, true, true, l1);
         s2 = mk_random(ism, am, 20, 3, 10, true, true, l2);

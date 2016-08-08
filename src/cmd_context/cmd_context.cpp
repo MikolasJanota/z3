@@ -44,6 +44,8 @@ Notes:
 #include"model_smt2_pp.h"
 #include"model_v2_pp.h"
 #include"model_params.hpp"
+#include"th_rewriter.h"
+#include"tactic_exception.h"
 
 func_decls::func_decls(ast_manager & m, func_decl * f):
     m_decls(TAG(func_decl*, f, 0)) {
@@ -246,6 +248,7 @@ protected:
     bv_util       m_bvutil;
     array_util    m_arutil;
     fpa_util      m_futil;
+    seq_util      m_sutil;
     datalog::dl_decl_util m_dlutil;
 
     format_ns::format * pp_fdecl_name(symbol const & s, func_decls const & fs, func_decl * f, unsigned & len) {
@@ -266,13 +269,14 @@ protected:
     }
 
 public:
-    pp_env(cmd_context & o):m_owner(o), m_autil(o.m()), m_bvutil(o.m()), m_arutil(o.m()), m_futil(o.m()), m_dlutil(o.m()) {}
+    pp_env(cmd_context & o):m_owner(o), m_autil(o.m()), m_bvutil(o.m()), m_arutil(o.m()), m_futil(o.m()), m_sutil(o.m()), m_dlutil(o.m()) {}
     virtual ~pp_env() {}
     virtual ast_manager & get_manager() const { return m_owner.m(); }
     virtual arith_util & get_autil() { return m_autil; }
     virtual bv_util & get_bvutil() { return m_bvutil; }
     virtual array_util & get_arutil() { return m_arutil; }
     virtual fpa_util & get_futil() { return m_futil; }
+    virtual seq_util & get_sutil() { return m_sutil; }
     virtual datalog::dl_decl_util& get_dlutil() { return m_dlutil; }
     virtual bool uses(symbol const & s) const {
         return
@@ -314,6 +318,7 @@ cmd_context::cmd_context(bool main_ctx, ast_manager * m, symbol const & l):
     m_print_success(m_params.m_smtlib2_compliant),
     m_random_seed(0),
     m_produce_unsat_cores(false),
+    m_produce_unsat_assumptions(false),
     m_produce_assignments(false),
     m_status(UNKNOWN),
     m_numeral_as_real(false),
@@ -322,6 +327,7 @@ cmd_context::cmd_context(bool main_ctx, ast_manager * m, symbol const & l):
     m_manager(m),
     m_own_manager(m == 0),
     m_manager_initialized(false),
+    m_rec_fun_declared(false),
     m_pmanager(0),
     m_sexpr_manager(0),
     m_regular("stdout", std::cout),
@@ -350,16 +356,14 @@ cmd_context::~cmd_context() {
 }
 
 void cmd_context::set_cancel(bool f) {
-    if (m_solver) {
+    if (has_manager()) {
         if (f) {
-            m_solver->cancel();
+            m().limit().cancel();
         }
         else {
-            m_solver->reset_cancel();
+            m().limit().reset_cancel();
         }
     }
-    if (has_manager())
-        m().set_cancel(f);
 }
 
 opt_wrapper* cmd_context::get_opt() {
@@ -542,6 +546,7 @@ bool cmd_context::logic_has_arith_core(symbol const & s) const {
         s == "QF_FP" ||
         s == "QF_FPBV" ||
         s == "QF_BVFP" ||
+        s == "QF_S" ||
         s == "HORN";
 }
 
@@ -574,7 +579,7 @@ bool cmd_context::logic_has_bv() const {
 }
 
 bool cmd_context::logic_has_seq_core(symbol const& s) const {
-    return s == "QF_BVRE";
+    return s == "QF_BVRE" || s == "QF_S";
 }
 
 bool cmd_context::logic_has_seq() const {
@@ -711,13 +716,7 @@ bool cmd_context::set_logic(symbol const & s) {
     if (has_manager() && m_main_ctx)
         throw cmd_exception("logic must be set before initialization");
     if (!supported_logic(s)) {
-        if (m_params.m_smtlib2_compliant) {
-            return false;
-        }
-        else {
-            warning_msg("unknown logic, ignoring set-logic command");
-            return true;
-        }
+        return false;
     }
     m_logic = s;
     if (is_logic("QF_RDL") ||
@@ -833,6 +832,27 @@ void cmd_context::insert(symbol const & s, object_ref * r) {
     m_object_refs.insert(s, r);
 }
 
+void cmd_context::insert_rec_fun(func_decl* f, expr_ref_vector const& binding, svector<symbol> const& ids, expr* e) {
+    expr_ref eq(m());
+    app_ref lhs(m());
+    lhs = m().mk_app(f, binding.size(), binding.c_ptr());
+    eq  = m().mk_eq(lhs, e);
+    if (!ids.empty()) {
+        expr* pat = m().mk_pattern(lhs);
+        eq  = m().mk_forall(ids.size(), f->get_domain(), ids.c_ptr(), eq, 0, m().rec_fun_qid(), symbol::null, 1, &pat);
+    }
+
+    //
+    // disable warning given the current way they are used 
+    // (Z3 will here silently assume and not check the definitions to be well founded, 
+    // and please use HSF for everything else).
+    //
+    if (false && !ids.empty() && !m_rec_fun_declared) {        
+        warning_msg("recursive function definitions are assumed well-founded");
+        m_rec_fun_declared = true;
+    }
+    assert_expr(eq);
+}
 
 func_decl * cmd_context::find_func_decl_for_model(symbol const & s) const {
     builtin_decl d;
@@ -1439,7 +1459,7 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
     if (m_opt && !m_opt->empty()) {
         was_opt = true;
         m_check_sat_result = get_opt();
-        cancel_eh<opt_wrapper> eh(*get_opt());
+        cancel_eh<reslimit> eh(m().limit());
         scoped_ctrl_c ctrlc(eh);
         scoped_timer timer(timeout, &eh);
         scoped_rlimit _rlimit(m().limit(), rlimit);
@@ -1464,6 +1484,7 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
             throw ex;
         }
         catch (z3_exception & ex) {
+            get_opt()->display_assignment(regular_stream());
             throw cmd_exception(ex.msg());
         }
         if (was_pareto && r == l_false) {
@@ -1474,7 +1495,7 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
     else if (m_solver) {
         m_check_sat_result = m_solver.get(); // solver itself stores the result.
         m_solver->set_progress_callback(this);
-        cancel_eh<solver> eh(*m_solver);
+        cancel_eh<reslimit> eh(m().limit());
         scoped_ctrl_c ctrlc(eh);
         scoped_timer timer(timeout, &eh);
         scoped_rlimit _rlimit(m().limit(), rlimit);
@@ -1485,7 +1506,8 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
             throw ex;
         }
         catch (z3_exception & ex) {
-            throw cmd_exception(ex.msg());
+            m_solver->set_reason_unknown(ex.msg());
+            r = l_undef;
         }
         m_solver->set_status(r);
     }
@@ -1509,6 +1531,29 @@ void cmd_context::check_sat(unsigned num_assumptions, expr * const * assumptions
         }
     }
 }
+
+void cmd_context::reset_assertions() {
+    if (!m_global_decls) {
+        reset(false);
+        return;
+    }
+
+    if (m_opt) {
+        m_opt = 0;
+    }
+    if (m_solver) {
+        m_solver = 0;
+        mk_solver();
+    }
+    restore_assertions(0);
+    svector<scope>::iterator it  = m_scopes.begin();
+    svector<scope>::iterator end = m_scopes.end();
+    for (; it != end; ++it) {
+        it->m_assertions_lim = 0;
+        if (m_solver) m_solver->push();
+    }
+}
+    
 
 void cmd_context::display_model(model_ref& mdl) {
     if (mdl) {
@@ -1610,7 +1655,8 @@ void cmd_context::validate_model() {
     model_evaluator evaluator(*(md.get()), p);
     contains_array_op_proc contains_array(m());
     {
-        cancel_eh<model_evaluator> eh(evaluator);
+        scoped_rlimit _rlimit(m().limit(), 0);
+        cancel_eh<reslimit> eh(m().limit());
         expr_ref r(m());
         scoped_ctrl_c ctrlc(eh);
         ptr_vector<expr>::const_iterator it  = begin_assertions();
@@ -1623,6 +1669,7 @@ void cmd_context::validate_model() {
                 TRACE("model_validate", tout << "checking\n" << mk_ismt2_pp(a, m()) << "\nresult:\n" << mk_ismt2_pp(r, m()) << "\n";);
                 if (m().is_true(r))
                     continue;
+
                 // The evaluator for array expressions is not complete
                 // If r contains as_array/store/map/const expressions, then we do not generate the error.
                 // TODO: improve evaluator for model expressions.
@@ -1633,6 +1680,7 @@ void cmd_context::validate_model() {
                 catch (contains_array_op_proc::found) {
                     continue;
                 }
+                TRACE("model_validate", model_smt2_pp(tout, *this, *(md.get()), 0););
                 throw cmd_exception("an invalid model was generated");
             }
         }
@@ -1701,6 +1749,7 @@ void cmd_context::display_statistics(bool show_total_time, double total_time) {
     }
     st.display_smt2(regular_stream());
 }
+
 
 void cmd_context::display_assertions() {
     if (!m_interactive_mode)

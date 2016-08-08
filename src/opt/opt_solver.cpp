@@ -162,7 +162,7 @@ namespace opt {
             std::stringstream file_name;
             file_name << "opt_solver" << ++m_dump_count << ".smt2";
             std::ofstream buffer(file_name.str().c_str());
-            to_smt2_benchmark(buffer, num_assumptions, assumptions, "opt_solver", "");
+            to_smt2_benchmark(buffer, num_assumptions, assumptions, "opt_solver");
             buffer.close();
             IF_VERBOSE(1, verbose_stream() << "(created benchmark: " << file_name.str() << "...";
                        verbose_stream().flush(););
@@ -290,6 +290,10 @@ namespace opt {
     std::string opt_solver::reason_unknown() const {
         return m_context.last_failure_as_string();
     }
+
+    void opt_solver::set_reason_unknown(char const* msg) {
+        m_context.set_reason_unknown(msg);
+    }
     
     void opt_solver::get_labels(svector<symbol> & r) {
         r.reset();
@@ -297,11 +301,7 @@ namespace opt {
         m_context.get_relevant_labels(0, tmp);
         r.append(tmp.size(), tmp.c_ptr());
     }
-    
-    void opt_solver::set_cancel(bool f) {
-        m_context.set_cancel(f);
-    }
-    
+        
     void opt_solver::set_progress_callback(progress_callback * callback) {
         m_callback = callback;
         m_context.set_progress_callback(callback);
@@ -400,7 +400,7 @@ namespace opt {
         unsigned num_assumptions, 
         expr * const * assumptions,
         char const * name, 
-        char const * logic, 
+        symbol const& logic,
         char const * status, 
         char const * attributes) {        
         ast_smt_pp pp(m);

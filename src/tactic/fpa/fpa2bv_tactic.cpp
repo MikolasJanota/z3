@@ -46,10 +46,6 @@ class fpa2bv_tactic : public tactic {
             m_rw.cfg().updt_params(p);
         }
 
-        void set_cancel(bool f) {
-            m_rw.set_cancel(f);
-        }
-
         virtual void operator()(goal_ref const & g,
                                 goal_ref_buffer & result,
                                 model_converter_ref & mc,
@@ -95,11 +91,10 @@ class fpa2bv_tactic : public tactic {
                         // that is (= e (fp #b0 #b1...1 #b0...01)), so that the value propagation
                         // has a value to propagate.
                         expr * sgn, *sig, *exp;
-                        expr_ref top_exp(m);
                         m_conv.split_fp(new_curr, sgn, exp, sig);
-                        m.mk_eq(sgn, m_conv.bu().mk_numeral(0, 1));
-                        m.mk_eq(exp, m_conv.bu().mk_numeral(-1, m_conv.bu().get_bv_size(exp)));
-                        m.mk_eq(sig, m_conv.bu().mk_numeral(1, m_conv.bu().get_bv_size(sig)));
+                        result.back()->assert_expr(m.mk_eq(sgn, m_conv.bu().mk_numeral(0, 1)));
+                        result.back()->assert_expr(m.mk_eq(exp, m_conv.bu().mk_numeral(-1, m_conv.bu().get_bv_size(exp))));
+                        result.back()->assert_expr(m.mk_eq(sig, m_conv.bu().mk_numeral(1, m_conv.bu().get_bv_size(sig))));
                     }
                 }
             }
@@ -159,18 +154,10 @@ public:
 
     virtual void cleanup() {
         imp * d = alloc(imp, m_imp->m, m_params);
-        #pragma omp critical (tactic_cancel)
-        {
-            std::swap(d, m_imp);
-        }
+        std::swap(d, m_imp);
         dealloc(d);
     }
 
-protected:
-    virtual void set_cancel(bool f) {
-        if (m_imp)
-            m_imp->set_cancel(f);
-    }
 };
 
 tactic * mk_fpa2bv_tactic(ast_manager & m, params_ref const & p) {
