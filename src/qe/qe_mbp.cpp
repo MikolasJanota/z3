@@ -276,6 +276,8 @@ class mbp::impl {
                 sub(fmls[i].get(), val);
                 m_rw(val);
                 if (!m.is_true(val)) {
+                    TRACE("qe", tout << mk_pp(fmls[i].get(), m) << " -> " << val << "\n";);
+                    fmls[i] = val;
                     if (j != i) {
                         fmls[j] = fmls[i].get();
                     }
@@ -291,9 +293,9 @@ class mbp::impl {
 public:
 
 
-    opt::inf_eps maximize(expr_ref_vector const& fmls, model& mdl, app* t, expr_ref& bound) {
+    opt::inf_eps maximize(expr_ref_vector const& fmls, model& mdl, app* t, expr_ref& ge, expr_ref& gt) {
         arith_project_plugin arith(m);
-        return arith.maximize(fmls, mdl, t, bound);
+        return arith.maximize(fmls, mdl, t, ge, gt);
     }
 
     void extract_literals(model& model, expr_ref_vector& fmls) {
@@ -434,12 +436,21 @@ public:
         }        
     }
 
+    bool validate_model(model& model, expr_ref_vector const& fmls) {
+        expr_ref val(m);
+        for (unsigned i = 0; i < fmls.size(); ++i) { 
+            VERIFY(model.eval(fmls[i], val) && m.is_true(val)); 
+        }
+        return true;
+    }
+
     void operator()(bool force_elim, app_ref_vector& vars, model& model, expr_ref_vector& fmls) {
-        model_smt2_pp(std::cerr << "mbp model: \n", m, model, 2); std::cerr << ")\n";
-        TRACE("qe", 
+        //model_smt2_pp(std::cerr << "mbp model: \n", m, model, 2); std::cerr << ")\n";
+        TRACE("qe",
            tout << "mbp in " << vars << " " << fmls << "\n";
            model_smt2_pp(tout << "model: \n", m, model, 2); tout << ")\n";
         );
+        SASSERT(validate_model(model, fmls));
         expr_ref val(m), tmp(m);
         app_ref var(m);
         expr_ref_vector unused_fmls(m);
@@ -456,7 +467,7 @@ public:
                     (*p)(model, vars, fmls);
                 }
             }
-            while (!vars.empty() && !fmls.empty()) {
+            while (!vars.empty() && !fmls.empty()) {                
                 var = vars.back();
                 vars.pop_back();
                 project_plugin* p = get_plugin(var);
@@ -494,6 +505,7 @@ public:
             vars.reset();
         }
         fmls.append(unused_fmls);
+        SASSERT(validate_model(model, fmls));
         TRACE("qe", tout << "mbp out " << vars << " " << fmls << "\n";);
     }
     
@@ -519,6 +531,6 @@ void mbp::extract_literals(model& model, expr_ref_vector& lits) {
     m_impl->extract_literals(model, lits);
 }
 
-opt::inf_eps mbp::maximize(expr_ref_vector const& fmls, model& mdl, app* t, expr_ref& bound) {
-    return m_impl->maximize(fmls, mdl, t, bound);
+opt::inf_eps mbp::maximize(expr_ref_vector const& fmls, model& mdl, app* t, expr_ref& ge, expr_ref& gt) {
+    return m_impl->maximize(fmls, mdl, t, ge, gt);
 }

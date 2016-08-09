@@ -149,8 +149,14 @@ public:
     */
     virtual expr * get_assumption(unsigned idx) const = 0;
 
-
-
+    /**
+    \brief under assumptions, asms, retrieve set of consequences that 
+    fix values for expressions that can be built from vars. 
+    The consequences are clauses whose first literal constrain one of the 
+    functions from vars and the other literals are negations of literals from asms.
+    */
+    
+    virtual lbool get_consequences(expr_ref_vector const& asms, expr_ref_vector const& vars, expr_ref_vector& consequences);
 
     /**
        \brief Display the content of this solver.
@@ -165,6 +171,11 @@ public:
         ~scoped_push() { if (!m_nopop) s.pop(1); }
         void disable_pop() { m_nopop = true; }
     };
+ 
+protected:
+
+    virtual lbool get_consequences_core(expr_ref_vector const& asms, expr_ref_vector const& vars, expr_ref_vector& consequences);
+
 };
 
 #endif

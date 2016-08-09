@@ -294,6 +294,7 @@ namespace smt {
         ast_manager&               m;
         dependency_manager         m_dm;
         solution_map               m_rep;        // unification representative.
+        bool                       m_reset_cache; // invalidate cache.
         scoped_vector<eq>          m_eqs;        // set of current equations.
         scoped_vector<ne>          m_nqs;        // set of current disequalities.
         scoped_vector<nc>          m_ncs;        // set of non-contains constraints.
@@ -308,6 +309,7 @@ namespace smt {
         bool            m_incomplete;             // is the solver (clearly) incomplete for the fragment.
         expr_ref_vector     m_int_string;
         rational_set        m_itos_axioms;
+        rational_set        m_stoi_axioms;
         obj_hashtable<expr> m_length;             // is length applied
         scoped_ptr_vector<apply> m_replay;        // set of actions to replay
         model_generator* m_mg;
@@ -493,6 +495,7 @@ namespace smt {
         void add_elim_string_axiom(expr* n);
         void add_at_axiom(expr* n);
         void add_in_re_axiom(expr* n);
+        bool add_stoi_axiom(expr* n);
         bool add_itos_axiom(expr* n);
         void add_itos_length_axiom(expr* n);
         literal mk_literal(expr* n);
