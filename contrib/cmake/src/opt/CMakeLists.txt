@@ -1,11 +1,6 @@
 z3_add_component(opt
   SOURCES
-    bcd2.cpp
-    fu_malik.cpp
-    hitting_sets.cpp
-    maxhs.cpp
     maxres.cpp
-    maxsls.cpp
     maxsmt.cpp
     mss.cpp
     opt_cmds.cpp
