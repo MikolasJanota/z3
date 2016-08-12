@@ -223,8 +223,6 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
     //simp2_p.set_bool("expand_select_store", true);
     //simp2_p.set_bool("sort_store", true);
 
-
-
     params_ref ctx_simp_p;
     ctx_simp_p.set_uint("max_depth", 32);
     ctx_simp_p.set_uint("max_steps", 5000000);
@@ -237,9 +235,9 @@ tactic * mk_q2_tactic(ast_manager & m, params_ref const & p) {
         mk_elim_uncnstr_tactic(m),
         if_no_proofs(if_no_unsat_cores(mk_bv_size_reduction_tactic(m))),
         using_params(mk_simplify_tactic(m), simp2_p),
-        mk_max_bv_sharing_tactic(m),
-        mk_macro_finder_tactic(m, p),
-        mk_nnf_tactic(m, p)
+        mk_max_bv_sharing_tactic(m)
+        //mk_macro_finder_tactic(m, p),
+        //mk_nnf_tactic(m, p)
         );
 
     return and_then(

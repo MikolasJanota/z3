@@ -24,6 +24,7 @@ Revision History:
 #include"quant_hoist.h"
 #include"inc_sat_solver.h"
 #include"qfaufbv_tactic.h"
+#include"qfbv_tactic.h"
 #include"model_smt2_pp.h"
 #include"model_evaluator.h"
 #include"smt_tactic.h"
@@ -483,13 +484,19 @@ class q2 : public q2_solver {
 inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
     params_ref p;
     p.copy(_p);
-    if (!uf) return mk_inc_sat_solver(m, p);
-    //return mk_smt_solver(m, p, symbol());
-    tactic_ref t = mk_qfaufbv_tactic(m, p);
-    //tactic_ref t = mk_smt_tactic(p);
-    solver* rv = mk_tactic2solver(m, t.get(), p);
-    rv->set_produce_models(true);
+    solver* rv = 0;
+    if (!uf) {
+        tactic_ref t = mk_qfbv_tactic(m, p);
+        rv = mk_tactic2solver(m, t.get(), p);        
+        //return mk_inc_sat_solver(m, p);
+    }
+    else {
+        //return mk_smt_solver(m, p, symbol());
+        tactic_ref t = mk_qfaufbv_tactic(m, p);        
+        rv = mk_tactic2solver(m, t.get(), p);
+    }    
     SASSERT(rv);
+    rv->set_produce_models(true);
     return rv;
 }
 
@@ -534,5 +541,5 @@ inline solver* mk_sat_solver(bool uf, ast_manager& m, const params_ref& _p) {
 //}
 
 q2_solver* mk_q2_solver(ast_manager& m, params_ref p, const ptr_vector<expr>& fmls) {
-    return alloc(q2, m, p, q2::UFBV , fmls); // q2::UFBV
+    return alloc(q2, m, p, q2::BV , fmls); // q2::UFBV
 }

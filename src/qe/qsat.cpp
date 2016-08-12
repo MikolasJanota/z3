@@ -159,7 +159,7 @@ namespace qe {
         }
         model_evaluator eval(*mdl);
         eval.set_model_completion(true);
-        TRACE("qe", model_v2_pp(tout, *mdl););
+        TRACE("qe", model_v2_pp(tout << "model:\n", *mdl););
 
         expr_ref val(m);
         for (unsigned j = 0; j < m_preds[level - 1].size(); ++j) {
@@ -197,8 +197,8 @@ namespace qe {
             }
         }
         TRACE("qe", tout << "level: " << level << "\n";
-              model_v2_pp(tout, *mdl);
-              display(tout, asms););
+              model_v2_pp(tout << "model:\n", *mdl);
+              display(tout << "assumptions:\n", asms););
     }
     
     void pred_abs::set_expr_level(app* v, max_level const& lvl) {
