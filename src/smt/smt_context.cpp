@@ -2460,6 +2460,13 @@ namespace smt {
         SASSERT(m_scope_lvl == m_base_lvl);
     }
 
+    void context::pop_to_search_lvl() {
+        unsigned num_levels = m_scope_lvl - get_search_level();
+        if (num_levels > 0) {
+            pop_scope(num_levels);
+        }
+    }
+
     /**
        \brief Simplify the given clause using the assignment.  Return
        true if the clause was already satisfied, and false otherwise.
@@ -2996,6 +3003,8 @@ namespace smt {
             // in a consistent context.
             if (inconsistent())
                 return; 
+            if (get_cancel_flag())
+                return;
             push_scope();
             for (unsigned i = 0; i < num_assumptions; i++) {
                 expr * curr_assumption = assumptions[i];
@@ -3035,7 +3044,7 @@ namespace smt {
             SASSERT(m_assumptions.empty());
             return; 
         }
-        obj_hashtable<expr> already_found_assumptions;
+        uint_set already_found_assumptions;
         literal_vector::const_iterator it  = m_conflict_resolution->begin_unsat_core();
         literal_vector::const_iterator end = m_conflict_resolution->end_unsat_core();
         for (; it != end; ++it) {
@@ -3044,10 +3053,9 @@ namespace smt {
             SASSERT(get_bdata(l.var()).m_assumption);
             if (!m_literal2assumption.contains(l.index())) l.neg();
             SASSERT(m_literal2assumption.contains(l.index()));
-            expr * a = m_literal2assumption[l.index()];
-            if (!already_found_assumptions.contains(a)) {
-                already_found_assumptions.insert(a);
-                m_unsat_core.push_back(a);
+            if (!already_found_assumptions.contains(l.index())) {
+                already_found_assumptions.insert(l.index());
+                m_unsat_core.push_back(m_literal2assumption[l.index()]);
             }
         }
         reset_assumptions();
@@ -3337,6 +3345,7 @@ namespace smt {
                     break; 
                 }
                 if (cmr == quantifier_manager::UNKNOWN) {
+                    IF_VERBOSE(1, verbose_stream() << "(smt.giveup quantifiers)\n";);
                     // giving up
                     m_last_search_failure = QUANTIFIERS;
                     status                = l_undef;
@@ -3413,7 +3422,6 @@ namespace smt {
     }
 
     lbool context::bounded_search() {
-        SASSERT(!inconsistent());
         unsigned counter = 0;
         
         TRACE("bounded_search", tout << "starting bounded search...\n";);
@@ -3487,6 +3495,7 @@ namespace smt {
             }
 
             if (resource_limits_exceeded() && !inconsistent()) {
+                m_last_search_failure = RESOURCE_LIMIT;
                 return l_undef;
             }
         }
@@ -4109,7 +4118,7 @@ namespace smt {
               m_fingerprints.display(tout); 
               );
         failure fl = get_last_search_failure();
-        if (fl == MEMOUT || fl == CANCELED || fl == TIMEOUT || fl == NUM_CONFLICTS) {
+        if (fl == MEMOUT || fl == CANCELED || fl == TIMEOUT || fl == NUM_CONFLICTS || fl == RESOURCE_LIMIT) {
             return;
         }
 

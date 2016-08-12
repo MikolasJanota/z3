@@ -1322,6 +1322,7 @@ namespace smt {
         virtual void setup_context(bool use_static_features);
         void setup_components(void);
         void pop_to_base_lvl();
+        void pop_to_search_lvl();
 #ifdef Z3DEBUG
         bool already_internalized_theory(theory * th) const;
         bool already_internalized_theory_core(theory * th, expr_ref_vector const & s) const;
@@ -1342,6 +1343,15 @@ namespace smt {
         static literal translate_literal(
             literal lit, context& src_ctx, context& dst_ctx,
             vector<bool_var> b2v, ast_translation& tr);
+
+        u_map<uint_set> m_antecedents;
+        void extract_fixed_consequences(unsigned idx, obj_map<expr, expr*>& var2val, uint_set const& assumptions, expr_ref_vector& conseq);
+        
+        unsigned delete_unfixed(obj_map<expr, expr*>& var2val, expr_ref_vector& unfixed);
+
+        unsigned extract_fixed_eqs(obj_map<expr, expr*>& var2val, expr_ref_vector& conseq);
+
+        expr_ref antecedent2fml(uint_set const& ante);
 
 
     public:
@@ -1382,6 +1392,8 @@ namespace smt {
         void pop(unsigned num_scopes);
 
         lbool check(unsigned num_assumptions = 0, expr * const * assumptions = 0, bool reset_cancel = true);        
+
+        lbool get_consequences(expr_ref_vector const& assumptions, expr_ref_vector const& vars, expr_ref_vector& conseq, expr_ref_vector& unfixed);
         
         lbool setup_and_check(bool reset_cancel = true);
         
@@ -1406,10 +1418,8 @@ namespace smt {
 
         void internalize_instance(expr * body, proof * pr, unsigned generation) {
             internalize_assertion(body, pr, generation);
-#ifndef SMTCOMP
             if (relevancy())
                 m_case_split_queue->internalize_instance_eh(body, generation);
-#endif
         }
 
         bool already_internalized() const { return m_e_internalized_stack.size() > 2 || m_b_internalized_stack.size() > 1; }
