@@ -67,7 +67,7 @@ tactic * mk_qfbv_preamble(ast_manager& m, params_ref const& p) {
             //
             using_params(mk_simplify_tactic(m), hoist_p),
             mk_max_bv_sharing_tactic(m),
-            if_no_proofs(if_no_unsat_cores(when(mk_is_qfufbv_probe(), mk_ackermannize_bv_tactic(m,p))))
+            if_no_proofs(if_no_unsat_cores(mk_ackermannize_bv_tactic(m,p)))
             );
 }
 
