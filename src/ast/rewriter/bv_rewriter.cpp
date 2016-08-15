@@ -2644,7 +2644,6 @@ br_status bv_rewriter::mk_mkbv(unsigned num, expr * const * args, expr_ref & res
     return BR_FAILED;
 }
 
-<<<<<<< HEAD
 br_status bv_rewriter::mk_ite_core(expr * c, expr * t, expr * e, expr_ref & result) {
     TRACE("bv_ite", tout << "mk_ite_core:\n" << mk_ismt2_pp(c, m()) << "?\n"
             << mk_ismt2_pp(t, m()) << "\n:" << mk_ismt2_pp(e, m()) << "\n";);

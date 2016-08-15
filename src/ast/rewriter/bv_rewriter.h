@@ -152,7 +152,6 @@ class bv_rewriter : public poly_rewriter<bv_rewriter_core> {
     void updt_local_params(params_ref const & p);
 
     expr * concat(unsigned num_args, expr * const * args);
-
 public:
     bv_rewriter(ast_manager & m, params_ref const & p = params_ref()):
         poly_rewriter<bv_rewriter_core>(m, p),
