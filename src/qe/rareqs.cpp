@@ -33,6 +33,8 @@
 #include "solver.h"
 #include "mus.h"
 
+#include"model_smt2_pp.h"
+
 namespace qe {
 namespace rareqs {
 
@@ -170,12 +172,17 @@ namespace rareqs {
             }
         }
 
+        lbool check_cand(const expr_ref_vector& assumptions) {
+            return m_abstraction ? m_abstraction->check_winning(assumptions)
+                                 : m_sat->s().check_sat(assumptions);
+        }
+
         virtual lbool check_winning(const expr_ref_vector& assumptions) {
             if (m_abstraction == NULL)
                 return (m_sat->s()).check_sat(assumptions);
             model_ref cex_model;
             while (1) {
-                const lbool has_cand = m_abstraction->check_winning(assumptions);
+                const lbool has_cand = check_cand(assumptions);
                 switch (has_cand) {
                 case l_undef: return l_undef;
                 case l_false: return l_false;
@@ -183,7 +190,7 @@ namespace rareqs {
                 unsigned game_index = 0;
                 bool cand_winning = true;
                 for (; game_index < m_games.size() && cand_winning; ++game_index) {
-                    switch (check_cand(assumptions, *(m_games[game_index]), cex_model)) {
+                    switch (check_cex(assumptions, *(m_games[game_index]), cex_model)) {
                     case l_undef: return l_undef;
                     case l_true:  break;
                     case l_false: cand_winning = false; break;
@@ -224,11 +231,13 @@ namespace rareqs {
             }
         }
 
-        lbool check_cand(const expr_ref_vector& assumptions,
-            prefixed_formula const & game,
-            /*out*/model_ref& cex_model) {
+        lbool check_cex(const expr_ref_vector& assumptions,
+            prefixed_formula const & game, /*out*/model_ref& cex_model) {
             model_ref mod;
-            m_abstraction->get_model(mod);
+            if (m_abstraction) m_abstraction->get_model(mod);
+            else m_sat->s().get_model(mod);
+
+            TRACE("qe", model_smt2_pp(tout << "candidate\n", m, *(mod.get()), 2););
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
             expr_substitution subst(m);
             model2substitution(m_free, mod, subst);
@@ -321,26 +330,27 @@ namespace rareqs {
             /* out */ expr_dependency_ref & core) {
             tactic_report report("rareqs-tactic", *in);
             ptr_vector<expr> fmls;
-            expr_ref_vector defs(m);
-            expr_ref fml(m);
             mc = 0; pc = 0; core = 0;
             in->get_formulas(fmls);
-
             prefixed_formula game(m);
             game.m_f = mk_and(m, fmls.size(), fmls.c_ptr());
 
             // for now:
-            // fail if cores.  (TBD)
-            // fail if proofs. (TBD)
-
+            // fail if cores.  (TODO)
+            // fail if proofs. (TODO)
+            fail_if_unsat_core_generation("rareqs", in);
+            fail_if_proof_generation("rareqs", in);
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
             reset();
-            TRACE("qe", tout << fml << "\n";);
+            TRACE("qe", tout << game.f() << "\n";);
 
             app_ref_vector free_vars(m);
             const quantifier_type top_qt = hoist(free_vars, game);
             rareqs_solver rs(m, top_qt);
             rs.add_free_vars(free_vars);
+            rs.add_game(game);
             const expr_ref_vector assumptions(m);
+            std::cerr << __FILE__ << ":" << __LINE__ << std::endl;
             const lbool wins = rs.check_winning(assumptions);
             const lbool is_sat = wins == l_undef ? l_undef
                 : (top_qt == existential) == (wins == l_true) ?
@@ -372,6 +382,9 @@ namespace rareqs {
 
         void reset_statistics() {
             m_stats.reset();
+        }
+
+        void reset() {
         }
 
         void cleanup() {
