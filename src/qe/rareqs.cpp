@@ -32,6 +32,7 @@
 #include "smt_solver.h"
 #include "solver.h"
 #include "mus.h"
+#include "th_rewriter.h"
 
 #include"model_smt2_pp.h"
 
@@ -156,10 +157,10 @@ namespace rareqs {
             o << '[' << std::endl;
             o << (m_qt == existential ? 'E' : 'A') << ' ';
             o << m_free << std::endl;
-            m_sat->s().display(o);
-            o << std::endl;
+            if (m_abstraction == NULL) { m_sat->s().display(o); o << std::endl; }
             for (unsigned i = 0; i < m_games.size(); ++i) {
                 const prefixed_formula& g = *(m_games[i]);
+                g.display(o << '[') << ']' << std::endl;
             }
             return o << ']' << std::endl;
         }
@@ -276,6 +277,8 @@ namespace rareqs {
             rareqs_solver game_solver(m, opponent(m_qt));
             game_solver.add_free_vars(game.prefix().get(0));
             tail(1, game.prefix(), next_game.m_prefix);
+            th_rewriter thw(m);
+            thw(next_game.m_f);
             game_solver.add_game(next_game);
             TRACE("qe", next_game.display(tout << "cex game\n"););
             TRACE("qe", game_solver.display(tout << "cex check\n"););
@@ -285,6 +288,7 @@ namespace rareqs {
         }
 
         void refine(const prefixed_formula& game, model_ref& cex_model) {
+            TRACE("qe", model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
             const vector<app_ref_vector>& orig_prefix = game.m_prefix;
             expr_substitution subst(m);
             model2substitution(orig_prefix[0], cex_model, subst);
@@ -293,6 +297,31 @@ namespace rareqs {
             prefixed_formula refined_game(m);
             (*er)(game.f(), refined_game.m_f);
             tail(2, game.prefix(), refined_game.m_prefix);
+            if (game.prefix().size() > 1) {
+                app_ref_vector fresh_vs(m);
+                freshen(game.prefix().get(1), fresh_vs, refined_game.m_f);
+                m_abstraction->add_free_vars(fresh_vs);
+            }
+            th_rewriter thw(m);
+            thw(refined_game.m_f);
+            m_abstraction->add_game(refined_game);
+            TRACE("qe", refined_game.display(tout << "refined game\n"););
+            TRACE("qe", m_abstraction->display(tout << "after refinement\n"););
+        }
+
+        void freshen(const app_ref_vector& vs, app_ref_vector& fresh_vs, expr_ref& f) {
+            expr_substitution subst(m);
+            for (unsigned i = 0; i < vs.size(); ++i) {
+                app * const v = vs.get(i);
+                app * const fv = m.mk_fresh_const(v->get_decl()->get_name().str().c_str(),
+                    v->get_decl()->get_range());
+                subst.insert(v, fv);
+                fresh_vs.push_back(fv);
+            }
+            scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
+            er->set_substitution(&subst);
+            prefixed_formula refined_game(m);
+            (*er)(f, f);
         }
 
         void allocate_abstraction() {
