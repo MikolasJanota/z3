@@ -6,6 +6,7 @@
   rareqs.h
 
  Abstract:
+ Implementation of the RAReQS architecture for solving quantified problems based on Janota et al., SAT '12.
 
 
  Author:

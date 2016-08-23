@@ -6,6 +6,7 @@
   rareqs.cpp
 
  Abstract:
+ Implementation of the RAReQS architecture for solving quantified problems based on Janota et al., SAT '12.
 
 
  Author:
@@ -38,7 +39,48 @@
 
 namespace qe {
 namespace rareqs {
+    /**
+      \brief reference counted block of variables (as vector)
+     */
+    class var_block {
+    protected:
+        unsigned       m_ref_count;
+        app_ref_vector m_vars;
+    public:
+        var_block(ast_manager& m) : m_ref_count(0), m_vars(m) {}
+        var_block(var_block& o) : m_vars(o.m_vars.m()) { UNREACHABLE(); }
+        ast_manager& m() { return m_vars.m(); }
+        void append(const var_block& o) { m_vars.append(o.m_vars); }
+        void append(const app_ref_vector& o) { m_vars.append(o); }
+        void reset() { m_vars.reset(); }
+        void push_back(app* a) { m_vars.push_back(a); }
+        bool empty() const { return m_vars.empty(); }
+        unsigned size() const { return m_vars.size(); }
+        app* get(unsigned i) const { return m_vars.get(i); }
 
+        const app_ref_vector&  vars() const { return m_vars;  }
+        //
+        // Reference counting
+        //
+        void inc_ref() { ++m_ref_count; }
+        void dec_ref() {
+            --m_ref_count;
+            if (m_ref_count == 0) {
+                dealloc(this);
+            }
+        }
+    };
+
+    std::ostream& operator <<(std::ostream& o, const var_block& vb) {
+        return o << vb.vars();
+    }
+
+    typedef ref<var_block> var_block_ref;
+    typedef vector<var_block_ref> prefix;
+
+    /**
+      \brief A wrapper for non-quantified solver.
+     */
     class kernel {
         ast_manager& m;
         params_ref   m_params;
@@ -73,22 +115,24 @@ namespace rareqs {
         }
     };
 
-    void tail(unsigned start, const vector<app_ref_vector>& in, vector<app_ref_vector>& out) {
-        for (unsigned i = start; i < in.size(); ++i) out.push_back(in[i]);
+    /**
+      \brief create a tail starting at start, from prefix in into prefix out.
+     */
+    void tail(unsigned start, const prefix& in, prefix& out) {
+        for (unsigned i = start; i < in.size(); ++i)
+            out.push_back(in[i]);
     }
 
-    void model2substitution (app_ref_vector const& vars,
+    void model2substitution (var_block_ref const& vars,
             model_ref const& model, expr_substitution& subs) {
-        app_ref_vector::iterator i = vars.begin();
-        const app_ref_vector::iterator e = vars.end();
-        expr_ref val(vars.m());
-        for (; i != e; ++i) {
-            model->eval(*i, val, true);
-            subs.insert(*i, val);
+        expr_ref val(vars->m());
+        for (unsigned i = 0; i < vars->size(); ++i) {
+            model->eval(vars->get(i), val, true);
+            subs.insert(vars->get(i), val);
         }
     }
 
-    void get_free_vars(expr* fml, app_ref_vector& vars) {
+    void get_free_vars(expr* fml, var_block_ref& vars) {
         ast_fast_mark1 mark;
         ptr_vector<expr> todo;
         todo.push_back(fml);
@@ -106,7 +150,7 @@ namespace rareqs {
             SASSERT(is_app(e));
             app* a = to_app(e);
             if (is_uninterp_const(a)) { // TBD generalize for uninterpreted functions.
-                vars.push_back(a);
+                vars->push_back(a);
             }
             for (unsigned i = 0; i < a->get_num_args(); ++i) {
                 todo.push_back(a->get_arg(i));
@@ -116,18 +160,17 @@ namespace rareqs {
 
     struct prefixed_formula {
         prefixed_formula(ast_manager& m) : m_f(m) {}
-        vector<app_ref_vector>     m_prefix;
-        expr_ref                   m_f;
-        const vector<app_ref_vector>&  prefix() const { return m_prefix; }
+        prefix     m_prefix;
+        expr_ref   m_f;
+        const prefix&  prefix() const { return m_prefix; }
         const expr_ref f() const { return m_f; }
 
         std::ostream& display(std::ostream& o) const {
             o << '[' << std::endl;
-            for (unsigned i =  0; i < prefix().size(); ++i)
-                o << prefix().get(i) << std::endl;
+            for (unsigned i = 0; i < prefix().size(); ++i)
+                o << *(prefix().get(i)) << std::endl;
             return o << f() << ']' << std::endl;
         }
-
     };
 
     enum quantifier_type {universal, existential};
@@ -141,49 +184,44 @@ namespace rareqs {
         return existential;
     }
 
+    /**
+      The solver creates instances of itself throughout its life.
+
+      If the solver is solving a problem of type EXAYEZ . F the the outermost
+      block X is kept as free and F is inserted as a game with the prefix AYEZ.
+
+      If a solver is solving (EAEA), counterexamples are used to instantiate
+      the second quantifier resulting into an abstraction of the prefix EA.
+
+      The chain of abstractions share a solver for the unquantified part
+      designated as m_sat.  A solver that was not created as an abstraction of
+      another solver is called top-level and is responsible for the  creation
+      and deletion of m_sat.
+    **/
     class rareqs_solver {
         ast_manager&                 m;
-        quantifier_type              m_qt;
-        kernel* const                m_sat;
-        const bool                   m_delete_sat;
-        app_ref_vector               m_free;
-        rareqs_solver*               m_abstraction;
-        ptr_vector<prefixed_formula> m_games;
-        model_ref                    m_model;
+        quantifier_type              m_qt;  //!<  quantifier type of the solver
+        kernel* const                m_sat; //!<  solver for the unquantified part
+        const bool                   m_top_level; //!<  determines if the solver is top-level
+        var_block_ref                m_free; //!<  the free variables for which value is computed if a winning move is found
+        rareqs_solver*               m_abstraction; //!<  abstraction, i.e. instantiations, of the inserted games
+        ptr_vector<prefixed_formula> m_games; //!< sub-games to be solved
+        model_ref                    m_model; //!< an assignment to the free variables if a winning move was found
+
         rareqs_solver(ast_manager& m, quantifier_type qt, kernel* sat)
-            : m(m), m_qt(qt), m_sat(sat), m_delete_sat(false), m_free(m), m_abstraction(NULL) {}
+            : m(m), m_qt(qt), m_sat(sat), m_top_level(false), m_abstraction(NULL) {}
     public:
-        std::ostream& display(std::ostream& o) {
-            o << '[' << std::endl;
-            o << (m_qt == existential ? 'E' : 'A') << ' ';
-            o << m_free << std::endl;
-            if (m_abstraction == NULL) { m_sat->s().display(o); o << std::endl; }
-            for (unsigned i = 0; i < m_games.size(); ++i) {
-                const prefixed_formula& g = *(m_games[i]);
-                g.display(o << '[') << ']' << std::endl;
-            }
-            return o << ']' << std::endl;
-        }
-
         rareqs_solver(ast_manager& m, quantifier_type qt)
-            : m(m), m_qt(qt), m_sat(alloc(kernel, m)), m_delete_sat(true), m_free(m),  m_abstraction(NULL) {}
+            : m(m), m_qt(qt), m_sat(alloc(kernel, m)), m_top_level(true), m_abstraction(NULL) {}
 
-        virtual void add_free_vars(const app_ref_vector& vs) {
+        void add_free_vars(var_block_ref& vs) {
             if (m_abstraction) m_abstraction->add_free_vars(vs);
-            m_free.append(vs);
+            if (m_free.get() == NULL || m_free->empty()) m_free = vs;
+            else m_free->append(*(vs.get()));
         }
 
-        virtual void add_free_var(app_ref& v) {
-            if (m_abstraction) m_abstraction->add_free_var(v);
-            m_free.push_back(v);
-        }
 
-        virtual void get_model(model_ref& out) {
-            SASSERT(m_model.get() != NULL);
-            out = m_model;
-        }
-
-        virtual void add_game(prefixed_formula& pf) {
+        void add_game(prefixed_formula& pf) {
             SASSERT(pf.f().get());
             if (pf.m_prefix.empty()) {
                 m_sat->assert_expr(m_qt == existential ? pf.m_f.get() : m.mk_not(pf.m_f));
@@ -195,12 +233,7 @@ namespace rareqs {
             }
         }
 
-        lbool check_cand(const expr_ref_vector& assumptions) {
-            return m_abstraction ? m_abstraction->check_winning(assumptions)
-                                 : m_sat->s().check_sat(assumptions);
-        }
-
-        virtual lbool check_winning(const expr_ref_vector& assumptions) {
+        lbool check_winning(const expr_ref_vector& assumptions) {
             if (m_games.empty()) {
                 const lbool retv = (m_sat->s()).check_sat(assumptions);
                 if (retv == l_true) make_model();
@@ -232,24 +265,50 @@ namespace rareqs {
             }
         }
 
+        /**
+         \brief Get a winning move, provided that check_winning returned l_true.
+         **/
+        void get_winning(model_ref& out) {
+            SASSERT(m_model.get() != NULL);
+            out = m_model;
+        }
+
         virtual ~rareqs_solver() {
             if (m_abstraction) dealloc(m_abstraction);
             std::for_each(m_games.begin(), m_games.end(), delete_proc<prefixed_formula>());
-            if (m_delete_sat) dealloc(m_sat);
+            if (m_top_level) dealloc(m_sat);
+        }
+
+        std::ostream& display(std::ostream& o) {
+            o << '[' << std::endl;
+            o << (m_qt == existential ? 'E' : 'A') << ' ';
+            o << *(m_free.get()) << std::endl;
+            if (m_abstraction == NULL) { m_sat->s().display(o); o << std::endl; }
+            for (unsigned i = 0; i < m_games.size(); ++i) {
+                const prefixed_formula& g = *(m_games[i]);
+                g.display(o << '[') << ']' << std::endl;
+            }
+            return o << ']' << std::endl;
         }
     protected:
+        lbool check_cand(const expr_ref_vector& assumptions) {
+            return m_abstraction ? m_abstraction->check_winning(assumptions)
+                                 : m_sat->s().check_sat(assumptions);
+        }
+
         void make_model() {
             model_ref a_model;
             if (m_abstraction) {
-                m_abstraction->get_model(a_model);
+                m_abstraction->get_winning(a_model);
             } else {
                 m_sat->s().get_model(a_model);
             }
             m_model.reset();
             m_model = alloc(model, m);
-
-            for (unsigned i = 0; i < m_free.size(); ++i) {
-                func_decl * const cd = m_free[i]->get_decl();
+            if (m_free.get() == NULL)
+                return;
+            for (unsigned i = 0; i < m_free->size(); ++i) {
+                func_decl * const cd = m_free->get(i)->get_decl();
                 if (cd->get_arity()) {
                     SASSERT(0); // TODO
                 }
@@ -261,35 +320,52 @@ namespace rareqs {
             }
         }
 
+        /**
+        \brief Check if the current candidate is a winning move for the given game.
+               If it isn't return the winning move for the counterexample.
+        */
         lbool check_cex(const expr_ref_vector& assumptions,
-            prefixed_formula const & game, /*out*/model_ref& cex_model) {
+            prefixed_formula& game, /*out*/model_ref& cex_model) {
             model_ref mod;
-            if (m_abstraction) m_abstraction->get_model(mod);
+            // get a candidate from the abstraction
+            if (m_abstraction) m_abstraction->get_winning(mod);
             else m_sat->s().get_model(mod);
-
             TRACE("qe", model_smt2_pp(tout << "candidate\n", m, *(mod.get()), 2););
-            scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
-            expr_substitution subst(m);
-            model2substitution(m_free, mod, subst);
-            er->set_substitution(&subst);
-            prefixed_formula next_game(m);
-            (*er)(game.f(), next_game.m_f);
+
+            prefixed_formula next_game(m); // game for the counterexample
+
+            //  plug in the candidate into the given game
+            if (m_free.get()) {
+                scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
+                expr_substitution subst(m);
+                model2substitution(m_free, mod, subst);
+                er->set_substitution(&subst);
+                (*er)(game.f(), next_game.m_f);
+
+                //  simplify the problem
+                th_rewriter thw(m);
+                thw(next_game.m_f);
+            }
+
+            // create a solver for the counterexample
             rareqs_solver game_solver(m, opponent(m_qt));
-            game_solver.add_free_vars(game.prefix().get(0));
+            game_solver.add_free_vars(game.m_prefix[0]);
             tail(1, game.prefix(), next_game.m_prefix);
-            th_rewriter thw(m);
-            thw(next_game.m_f);
+
+            // insert the new game into the new solver
             game_solver.add_game(next_game);
             TRACE("qe", next_game.display(tout << "cex game\n"););
             TRACE("qe", game_solver.display(tout << "cex check\n"););
+
+            // run the new solver
             const lbool retv = game_solver.check_winning(assumptions);
-            if (retv == l_true) game_solver.get_model(cex_model);
+            if (retv == l_true) game_solver.get_winning(cex_model);
             return retv;
         }
 
         void refine(const prefixed_formula& game, model_ref& cex_model) {
             TRACE("qe", model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
-            const vector<app_ref_vector>& orig_prefix = game.m_prefix;
+            const prefix& orig_prefix = game.m_prefix;
             expr_substitution subst(m);
             model2substitution(orig_prefix[0], cex_model, subst);
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
@@ -298,7 +374,7 @@ namespace rareqs {
             (*er)(game.f(), refined_game.m_f);
             tail(2, game.prefix(), refined_game.m_prefix);
             if (game.prefix().size() > 1) {
-                app_ref_vector fresh_vs(m);
+                var_block_ref fresh_vs(alloc(var_block, m));
                 freshen(game.prefix().get(1), fresh_vs, refined_game.m_f);
                 m_abstraction->add_free_vars(fresh_vs);
             }
@@ -309,14 +385,14 @@ namespace rareqs {
             TRACE("qe", m_abstraction->display(tout << "after refinement\n"););
         }
 
-        void freshen(const app_ref_vector& vs, app_ref_vector& fresh_vs, expr_ref& f) {
+        void freshen(const var_block_ref& vs, var_block_ref& fresh_vs, expr_ref& f) {
             expr_substitution subst(m);
-            for (unsigned i = 0; i < vs.size(); ++i) {
-                app * const v = vs.get(i);
+            for (unsigned i = 0; i < vs->size(); ++i) {
+                app * const v = vs->get(i);
                 app * const fv = m.mk_fresh_const(v->get_decl()->get_name().str().c_str(),
                     v->get_decl()->get_range());
                 subst.insert(v, fv);
-                fresh_vs.push_back(fv);
+                fresh_vs->push_back(fv);
             }
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
             er->set_substitution(&subst);
@@ -326,7 +402,8 @@ namespace rareqs {
 
         void allocate_abstraction() {
             m_abstraction = alloc(rareqs_solver, m, m_qt, m_sat);
-            m_abstraction->add_free_vars(m_free);
+            if (m_free.get())
+                m_abstraction->add_free_vars(m_free);
         }
     };
 
@@ -342,7 +419,7 @@ namespace rareqs {
         stats                      m_stats;
         statistics                 m_st;
 
-        quantifier_type hoist(app_ref_vector& free_vars, prefixed_formula& game) {
+        quantifier_type hoist(var_block_ref free_vars, prefixed_formula& game) {
             proof_ref pr(m);
             label_rewriter rw(m);
             rw.remove_labels(game.m_f, pr);
@@ -350,18 +427,24 @@ namespace rareqs {
             get_free_vars(game.f(), free_vars);
             app_ref_vector vars(m);
             hoist.pull_quantifier(false/*existential*/, game.m_f, vars);
-            free_vars.append(vars);
-            const bool no_top_exists = free_vars.empty();
-            if (no_top_exists)
-                hoist.pull_quantifier(true/*universal*/, game.m_f, free_vars);
-            const quantifier_type top_qt = no_top_exists && free_vars.size() ? universal : existential;
+            free_vars->append(vars);
+            vars.reset();
+            const bool no_top_exists = free_vars->empty();
+            if (no_top_exists) {
+                hoist.pull_quantifier(true/*universal*/, game.m_f, vars);
+                free_vars->append(vars);
+                vars.reset();
+            }
+            const quantifier_type top_qt = no_top_exists && free_vars->size() ? universal : existential;
             quantifier_type qt = top_qt;
             while (1) {
                 qt = opponent(qt);
                 vars.reset();
                 hoist.pull_quantifier(qt == universal, game.m_f, vars);
                 if (vars.empty()) break;
-                game.m_prefix.push_back(vars);
+                var_block_ref tmp(alloc(var_block, m));
+                tmp->append(vars);
+                game.m_prefix.push_back(tmp);
             }
             return top_qt;
         }
@@ -404,7 +487,7 @@ namespace rareqs {
             reset();
             TRACE("qe", tout << game.f() << "\n";);
 
-            app_ref_vector free_vars(m);
+            var_block_ref free_vars(alloc(var_block,m));
             const quantifier_type top_qt = hoist(free_vars, game);
             rareqs_solver rs(m, top_qt);
             rs.add_free_vars(free_vars);
