@@ -34,6 +34,7 @@
 #include "solver.h"
 #include "mus.h"
 #include "th_rewriter.h"
+#include "inc_sat_solver.h"
 
 #include"model_smt2_pp.h"
 
@@ -89,7 +90,7 @@ namespace rareqs {
     public:
         kernel(ast_manager& m):
             m(m),
-            m_solver(mk_smt_solver(m, m_params, symbol::null))
+            m_solver(mk_solver())
         {
             m_params.set_bool("model", true);
             m_params.set_uint("relevancy_lvl", 0);
@@ -102,7 +103,7 @@ namespace rareqs {
         solver const& s() const { return *m_solver; }
 
         void reset() {
-            m_solver = mk_smt_solver(m, m_params, symbol::null);
+            m_solver = mk_solver();
         }
         void assert_expr(expr* e) {
             m_solver->assert_expr(e);
@@ -113,6 +114,11 @@ namespace rareqs {
             m_solver->get_unsat_core(core);
             TRACE("qe", m_solver->display(tout << "core: " << core << "\n") << "\n";);
         }
+
+        solver * mk_solver() {
+            return 0 ? mk_inc_sat_solver(m, m_params) : mk_smt_solver(m, m_params, symbol::null);
+        }
+
     };
 
     /**
@@ -207,12 +213,16 @@ namespace rareqs {
         rareqs_solver*               m_abstraction; //!<  abstraction, i.e. instantiations, of the inserted games
         ptr_vector<prefixed_formula> m_games; //!< sub-games to be solved
         model_ref                    m_model; //!< an assignment to the free variables if a winning move was found
-
-        rareqs_solver(ast_manager& m, quantifier_type qt, kernel* sat)
-            : m(m), m_qt(qt), m_sat(sat), m_top_level(false), m_abstraction(NULL) {}
     public:
-        rareqs_solver(ast_manager& m, quantifier_type qt)
-            : m(m), m_qt(qt), m_sat(alloc(kernel, m)), m_top_level(true), m_abstraction(NULL) {}
+        struct stats {
+            unsigned m_quant_instantiations;
+            stats() { reset(); }
+            void reset() { memset(this, 0, sizeof(*this)); }
+        };
+
+
+        rareqs_solver(ast_manager& m, quantifier_type qt, stats& st)
+            : m(m), m_qt(qt), m_sat(alloc(kernel, m)), m_top_level(true), m_abstraction(NULL), m_st(st) {}
 
         void add_free_vars(var_block_ref& vs) {
             if (m_abstraction) m_abstraction->add_free_vars(vs);
@@ -291,6 +301,12 @@ namespace rareqs {
             return o << ']' << std::endl;
         }
     protected:
+        stats&                       m_st;
+
+        rareqs_solver(ast_manager& m, quantifier_type qt, kernel* sat, stats& st)
+            : m(m), m_qt(qt), m_sat(sat), m_top_level(false), m_abstraction(NULL), m_st(st) {}
+
+
         lbool check_cand(const expr_ref_vector& assumptions) {
             return m_abstraction ? m_abstraction->check_winning(assumptions)
                                  : m_sat->s().check_sat(assumptions);
@@ -348,7 +364,7 @@ namespace rareqs {
             }
 
             // create a solver for the counterexample
-            rareqs_solver game_solver(m, opponent(m_qt));
+            rareqs_solver game_solver(m, opponent(m_qt), m_st);
             game_solver.add_free_vars(game.m_prefix[0]);
             tail(1, game.prefix(), next_game.m_prefix);
 
@@ -365,6 +381,7 @@ namespace rareqs {
 
         void refine(const prefixed_formula& game, model_ref& cex_model) {
             TRACE("qe", model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
+            m_st.m_quant_instantiations++;
             const prefix& orig_prefix = game.m_prefix;
             expr_substitution subst(m);
             model2substitution(orig_prefix[0], cex_model, subst);
@@ -401,22 +418,16 @@ namespace rareqs {
         }
 
         void allocate_abstraction() {
-            m_abstraction = alloc(rareqs_solver, m, m_qt, m_sat);
+            m_abstraction = alloc(rareqs_solver, m, m_qt, m_sat, m_st);
             if (m_free.get())
                 m_abstraction->add_free_vars(m_free);
         }
     };
 
     class rareqs : public tactic {
-
-        struct stats {
-            stats() { reset(); }
-            void reset() { memset(this, 0, sizeof(*this)); }
-        };
-
         ast_manager&               m;
         params_ref                 m_params;
-        stats                      m_stats;
+        rareqs_solver::stats       m_stats;
         statistics                 m_st;
 
         quantifier_type hoist(var_block_ref free_vars, prefixed_formula& game) {
@@ -489,14 +500,13 @@ namespace rareqs {
 
             var_block_ref free_vars(alloc(var_block,m));
             const quantifier_type top_qt = hoist(free_vars, game);
-            rareqs_solver rs(m, top_qt);
+            rareqs_solver rs(m, top_qt, m_stats);
             rs.add_free_vars(free_vars);
             rs.add_game(game);
             const expr_ref_vector assumptions(m);
             const lbool wins = rs.check_winning(assumptions);
             const lbool is_sat = wins == l_undef ? l_undef
-                : (top_qt == existential) == (wins == l_true) ?
-                l_true : l_false;
+                                                 : (top_qt == existential) == (wins == l_true) ? l_true : l_false;
             switch (is_sat) {
             case l_false:
                 in->reset();
@@ -520,6 +530,7 @@ namespace rareqs {
 
         void collect_statistics(statistics & st) const {
             st.copy(m_st);
+            st.update("quant instantiations", m_stats.m_quant_instantiations);
         }
 
         void reset_statistics() {
