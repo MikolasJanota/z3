@@ -458,36 +458,41 @@ void macro_util::normalize_expr(app * head, expr * t, expr_ref & norm_t) const {
     expr_ref_buffer  var_mapping(m_manager);
     bool changed = false;
     unsigned num_args = head->get_num_args();
-    unsigned max      = num_args;
+    unsigned max_var_idx = 0;
     for (unsigned i = 0; i < num_args; i++) {
-        var * v     = to_var(head->get_arg(i));
-        if (v->get_idx() >= max)
-            max = v->get_idx() + 1;
+        var const * v = to_var(head->get_arg(i));
+        if (v->get_idx() > max_var_idx)
+            max_var_idx = v->get_idx();
     }
     TRACE("normalize_expr_bug",
           tout << "head: " << mk_pp(head, m_manager) << "\n";
           tout << "applying substitution to:\n" << mk_bounded_pp(t, m_manager) << "\n";);
     for (unsigned i = 0; i < num_args; i++) {
-        var * v     = to_var(head->get_arg(i));
+        var * v = to_var(head->get_arg(i));
         if (v->get_idx() != i) {
             changed = true;
-            var * new_var = m_manager.mk_var(i, v->get_sort());
-            CTRACE("normalize_expr_bug", v->get_idx() >= num_args, tout << mk_pp(v, m_manager) << ", num_args: " << num_args << "\n";);
-            SASSERT(v->get_idx() < max);
-            var_mapping.setx(max - v->get_idx() - 1, new_var);
+            var_ref new_var(m_manager.mk_var(i, v->get_sort()), m_manager);
+            var_mapping.setx(max_var_idx - v->get_idx(), new_var);
         }
-        else {
-            var_mapping.setx(max - i - 1, v);
-        }
+        else
+            var_mapping.setx(max_var_idx - i, v);
     }
+    
+    for (unsigned i = num_args; i <= max_var_idx; i++)
+        // CMW: Won't be used, but dictates a larger binding size, 
+        // so that the indexes between here and in the rewriter match.
+        // It's possible that we don't see the true max idx of all vars here.
+        var_mapping.setx(max_var_idx - i, 0); 
+
     if (changed) {
         // REMARK: t may have nested quantifiers... So, I must use the std order for variable substitution.
-        var_subst subst(m_manager); 
+        var_subst subst(m_manager, true); 
         TRACE("macro_util_bug",
               tout << "head: " << mk_pp(head, m_manager) << "\n";
-              tout << "applying substitution to:\n" << mk_ll_pp(t, m_manager) << "\nsubstitituion:\n";
+              tout << "applying substitution to:\n" << mk_ll_pp(t, m_manager) << "\nsubstitution:\n";
               for (unsigned i = 0; i < var_mapping.size(); i++) {
-                  tout << "#" << i << " -> " << mk_pp(var_mapping[i], m_manager) << "\n";
+                  if (var_mapping[i] != 0)
+                    tout << "#" << i << " -> " << mk_ll_pp(var_mapping[i], m_manager);
               });
         subst(t, var_mapping.size(), var_mapping.c_ptr(), norm_t);
     }
