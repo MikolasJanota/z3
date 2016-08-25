@@ -83,8 +83,12 @@ public:
     ~impl() {
     }
 
-    bool reduce_equalities(model& model, app_ref_vector const& vars, expr_ref_vector& lits,
+    bool reduce_equalities(model& mdl, app_ref_vector const& vars, expr_ref_vector& lits,
             /*out*/expr_substitution& strategy) {
+        TRACE("qe",
+            tout << "reduce_equalities in: " << "vars: " << vars << "\nlits: \n" << lits << "\n";
+            model_smt2_pp(tout << "mdl\n", m, mdl, 2); tout << "\n";
+            );
         expr_mark is_var, is_rem;
         if (vars.empty())
             return false;

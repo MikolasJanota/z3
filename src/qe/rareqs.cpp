@@ -37,6 +37,9 @@
 #include "th_rewriter.h"
 #include "inc_sat_solver.h"
 
+#include "nnf.h"
+#include "nnf_params.hpp"
+
 #include"model_smt2_pp.h"
 
 namespace qe {
@@ -140,10 +143,19 @@ namespace rareqs {
     }
 
     void get_free_vars(expr* fml, var_block_ref& vars) {
+        //decl_collector dc(vars->m(), false);
+        //dc.visit(fml);
+        //const unsigned count = dc.get_num_decls();
+        //func_decl const * const * ds = dc.get_func_decls();
+        //for (unsigned i = 0; i < count; ++i) {
+        //    app * const d = ds[i];
+        //    vars->push_back();
+        //}
         ast_fast_mark1 mark;
         ptr_vector<expr> todo;
+        unsigned sz0 = todo.size();
         todo.push_back(fml);
-        while (todo.size()) {
+        while (sz0 != todo.size()) {
             expr* e = todo.back();
             todo.pop_back();
             if (mark.is_marked(e) || is_var(e)) {
@@ -155,8 +167,9 @@ namespace rareqs {
                 continue;
             }
             SASSERT(is_app(e));
-            app* a = to_app(e);
-            if (is_uninterp_const(a)) { // TBD generalize for uninterpreted functions.
+            app* a = to_app(e); 
+            if (is_uninterp(a)) {
+                SASSERT(is_uninterp_const(a)); // TBD generalize for uninterpreted functions.
                 vars->push_back(a);
             }
             for (unsigned i = 0; i < a->get_num_args(); ++i) {
@@ -165,22 +178,12 @@ namespace rareqs {
         }
     }
 
-    struct prefixed_formula {
-        prefixed_formula(ast_manager& m) : m_f(m) {}
-        prefix     m_prefix;
-        expr_ref   m_f;
-        const prefix&  prefix() const { return m_prefix; }
-        const expr_ref& f() const { return m_f; }
+    enum quantifier_type { universal, existential };
 
-        std::ostream& display(std::ostream& o) const {
-            o << '[' << std::endl;
-            for (unsigned i = 0; i < prefix().size(); ++i)
-                o << *(prefix().get(i)) << std::endl;
-            return o << f() << ']' << std::endl;
-        }
-    };
+    std::ostream& operator <<(std::ostream& o, const quantifier_type& qt) {
+        return o << (qt == universal ? "A" : "E");
+    }
 
-    enum quantifier_type {universal, existential};
 
     quantifier_type opponent(quantifier_type qt) {
         switch (qt) {
@@ -191,6 +194,27 @@ namespace rareqs {
         return existential;
     }
 
+
+    struct prefixed_formula {
+        prefixed_formula(ast_manager& m) : m_f(m) {}
+        quantifier_type m_qt;
+        prefix     m_prefix;
+        expr_ref   m_f;
+        const prefix&  prefix() const { return m_prefix; }
+        const expr_ref& f() const { return m_f; }
+
+        std::ostream& display(std::ostream& o) const {
+            quantifier_type qt = m_qt;
+            o << '[' << std::endl;
+            for (unsigned i = 0; i < prefix().size(); ++i) {
+                qt = opponent(qt);
+                o <<  qt << " " <<  *(prefix().get(i)) << std::endl;
+            }
+            return o << f() << ']' << std::endl;
+        }
+    };
+
+    
     /**
       The solver creates instances of itself throughout its life.
 
@@ -350,7 +374,7 @@ namespace rareqs {
             TRACE("qe", model_smt2_pp(tout << "candidate\n", m, *(mod.get()), 2););
 
             prefixed_formula next_game(m); // game for the counterexample
-
+            next_game.m_qt = opponent(m_qt);
             //  plug in the candidate into the given game
             if (m_free.get()) {
                 scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
@@ -391,6 +415,7 @@ namespace rareqs {
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
             er->set_substitution(&strategy);
             prefixed_formula refined_game(m);
+            refined_game.m_qt = m_qt;
             (*er)(game.f(), refined_game.m_f);
             tail(2, game.prefix(), refined_game.m_prefix);
             if (game.prefix().size() > 1) {
@@ -439,6 +464,7 @@ namespace rareqs {
             rw.remove_labels(game.m_f, pr);
             quantifier_hoister hoist(m);
             get_free_vars(game.f(), free_vars);
+            TRACE("qe", tout << "free vars for " << mk_pp(game.f(), m) << "\n[" << free_vars->vars() << "]\n";);
             app_ref_vector vars(m);
             hoist.pull_quantifier(false/*existential*/, game.m_f, vars);
             free_vars->append(vars);
@@ -449,8 +475,8 @@ namespace rareqs {
                 free_vars->append(vars);
                 vars.reset();
             }
-            const quantifier_type top_qt = no_top_exists && free_vars->size() ? universal : existential;
-            quantifier_type qt = top_qt;
+            game.m_qt = no_top_exists && free_vars->size() ? universal : existential;
+            quantifier_type qt = game.m_qt;
             while (1) {
                 qt = opponent(qt);
                 vars.reset();
@@ -460,7 +486,7 @@ namespace rareqs {
                 tmp->append(vars);
                 game.m_prefix.push_back(tmp);
             }
-            return top_qt;
+            return game.m_qt;
         }
     public:
 
@@ -490,8 +516,10 @@ namespace rareqs {
             ptr_vector<expr> fmls;
             mc = 0; pc = 0; core = 0;
             in->get_formulas(fmls);
+
             prefixed_formula game(m);
             game.m_f = mk_and(m, fmls.size(), fmls.c_ptr());
+            TRACE("qe", tout << "in: " << mk_pp(game.m_f, m) << "\n";);
 
             // for now:
             // fail if cores.  (TODO)
@@ -499,10 +527,25 @@ namespace rareqs {
             fail_if_unsat_core_generation("rareqs", in);
             fail_if_proof_generation("rareqs", in);
             reset();
-            TRACE("qe", tout << game.f() << "\n";);
 
-            var_block_ref free_vars(alloc(var_block,m));
+            var_block_ref free_vars(alloc(var_block,m));          
             const quantifier_type top_qt = hoist(free_vars, game);
+
+            params_ref nnf_p;
+            nnf_p.copy(m_params);
+            nnf_p.set_bool("skolemize", false);
+            defined_names df(m);
+            expr_ref_vector new_defs(m);        // [OUT] new definitions
+            proof_ref_vector new_def_proofs(m); // [OUT] proofs of the new definitions 
+            expr_ref r(m);                       // [OUT] resultant expression
+            proof_ref p(m);                     // [OUT] proof for (~ n r)
+
+            nnf mk_nnf(m, df, nnf_p);
+            mk_nnf(game.m_f, new_defs, new_def_proofs, r, p);
+            game.m_f = r;
+
+
+            TRACE("qe", game.display(tout << "top game: ") << "\n";);
             rareqs_solver rs(m, top_qt, m_stats);
             rs.add_free_vars(free_vars);
             rs.add_game(game);
