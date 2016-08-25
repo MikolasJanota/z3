@@ -26,6 +26,7 @@
 #include "rareqs.h"
 #include "expr_abstract.h"
 #include "qe.h"
+#include "qe_strategy.h"
 #include "label_rewriter.h"
 #include "expr_replacer.h"
 #include "th_rewriter.h"
@@ -123,7 +124,7 @@ namespace rareqs {
             out.push_back(in[i]);
     }
 
-    void model2substitution (var_block_ref const& vars,
+    void model2substitution(var_block_ref const& vars,
             model_ref const& model, expr_substitution& subs) {
         expr_ref val(vars->m());
         for (unsigned i = 0; i < vars->size(); ++i) {
@@ -163,7 +164,7 @@ namespace rareqs {
         prefix     m_prefix;
         expr_ref   m_f;
         const prefix&  prefix() const { return m_prefix; }
-        const expr_ref f() const { return m_f; }
+        const expr_ref& f() const { return m_f; }
 
         std::ostream& display(std::ostream& o) const {
             o << '[' << std::endl;
@@ -366,10 +367,12 @@ namespace rareqs {
         void refine(const prefixed_formula& game, model_ref& cex_model) {
             TRACE("qe", model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
             const prefix& orig_prefix = game.m_prefix;
-            expr_substitution subst(m);
-            model2substitution(orig_prefix[0], cex_model, subst);
+            expr_substitution strategy(m);
+            //model2substitution(orig_prefix[0], cex_model, strategy);
+            mk_strategy mk_strategy(m);
+            mk_strategy((game.prefix())[0]->vars(), *(cex_model.get()), game.f(), strategy);
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
-            er->set_substitution(&subst);
+            er->set_substitution(&strategy);
             prefixed_formula refined_game(m);
             (*er)(game.f(), refined_game.m_f);
             tail(2, game.prefix(), refined_game.m_prefix);
