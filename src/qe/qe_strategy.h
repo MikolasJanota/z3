@@ -19,8 +19,11 @@
 #include "ast.h"
 #include "model.h"
 #include "expr_substitution.h"
+#include <ostream>
 namespace qe {
 namespace rareqs {
+    std::ostream& prn_strategy(std::ostream& o, app_ref_vector const& vars, expr_substitution& strategy);
+
     class mk_strategy {
         class impl;
         impl * m_impl;

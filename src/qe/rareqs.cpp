@@ -54,7 +54,7 @@ namespace rareqs {
     public:
         var_block(ast_manager& m) : m_ref_count(0), m_vars(m) {}
         var_block(var_block& o) : m_vars(o.m_vars.m()) { UNREACHABLE(); }
-        ast_manager& m() { return m_vars.m(); }
+        ast_manager& m() const { return m_vars.m(); }
         void append(const var_block& o) { m_vars.append(o.m_vars); }
         void append(const app_ref_vector& o) { m_vars.append(o); }
         void reset() { m_vars.reset(); }
@@ -77,7 +77,12 @@ namespace rareqs {
     };
 
     std::ostream& operator <<(std::ostream& o, const var_block& vb) {
-        return o << vb.vars();
+        const app_ref_vector& vs = vb.vars();
+        for (unsigned i = 0; i < vs.size(); ++i) {
+            if (i) o << " ";
+            o << mk_pp(vs.get(i), vb.m());
+        }
+        return o;
     }
 
     typedef ref<var_block> var_block_ref;
@@ -214,9 +219,9 @@ namespace rareqs {
         }
     };
 
-    
+
     /**
-      The solver creates instances of itself throughout its life.
+      The solver creates instances of itself throughout its life to solve subproblems.
 
       If the solver is solving a problem of type EXAYEZ . F the the outermost
       block X is kept as free and F is inserted as a game with the prefix AYEZ.
@@ -318,7 +323,10 @@ namespace rareqs {
             o << '[' << std::endl;
             o << (m_qt == existential ? 'E' : 'A') << ' ';
             o << *(m_free.get()) << std::endl;
-            if (m_abstraction == NULL) { m_sat->s().display(o); o << std::endl; }
+            if (m_abstraction == NULL) {
+                o << "SAT problem" << "[" << std::endl;
+                m_sat->s().display(o); o << "]" << std::endl;
+            }
             for (unsigned i = 0; i < m_games.size(); ++i) {
                 const prefixed_formula& g = *(m_games[i]);
                 g.display(o << '[') << ']' << std::endl;
@@ -338,12 +346,7 @@ namespace rareqs {
         }
 
         void make_model() {
-            model_ref a_model;
-            if (m_abstraction) {
-                m_abstraction->get_winning(a_model);
-            } else {
-                m_sat->s().get_model(a_model);
-            }
+            model_ref a_model = get_candidate(); 
             m_model.reset();
             m_model = alloc(model, m);
             if (m_free.get() == NULL)
@@ -367,12 +370,8 @@ namespace rareqs {
         */
         lbool check_cex(const expr_ref_vector& assumptions,
             prefixed_formula& game, /*out*/model_ref& cex_model) {
-            model_ref mod;
-            // get a candidate from the abstraction
-            if (m_abstraction) m_abstraction->get_winning(mod);
-            else m_sat->s().get_model(mod);
+            model_ref const mod = get_candidate(); // get a candidate from the abstraction
             TRACE("qe", model_smt2_pp(tout << "candidate\n", m, *(mod.get()), 2););
-
             prefixed_formula next_game(m); // game for the counterexample
             next_game.m_qt = opponent(m_qt);
             //  plug in the candidate into the given game
@@ -404,15 +403,33 @@ namespace rareqs {
             return retv;
         }
 
-        void refine(const prefixed_formula& game, model_ref& cex_model) {
-            TRACE("qe", model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
+        model_ref get_candidate() {
+            model_ref rv;
+            if (m_abstraction) m_abstraction->get_winning(rv);
+            else m_sat->s().get_model(rv);
+            return rv;
+        }
+
+        model_ref mk_complete_model(model_ref& cex_model) {
+            model_ref const cand = get_candidate();
+            model_ref retv(cex_model->copy());
+            retv->copy_const_interps(*(cand.get()));
+            return retv;
+        }
+
+        void refine(const prefixed_formula& game, model_ref& cex_model) {            
+            TRACE("qe", game.display(tout << "refining") << std::endl;
+                model_smt2_pp(tout << "cex_model\n", m, *(cex_model.get()), 2););
             m_st.m_quant_instantiations++;
             const prefix& orig_prefix = game.m_prefix;
             expr_substitution strategy(m);
             //model2substitution(orig_prefix[0], cex_model, strategy);
             mk_strategy mk_strategy(m);
-            mk_strategy((game.prefix())[0]->vars(), *(cex_model.get()), game.f(), strategy);
+            model_ref complete_model = mk_complete_model(cex_model);
+            const var_block_ref& elim_vars = (game.prefix())[0];
+            mk_strategy(elim_vars->vars(), *(complete_model.get()), game.f(), strategy);
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
+            TRACE("qe", prn_strategy(tout << "refining subsitution\n", elim_vars->vars(), strategy) << std::endl;);
             er->set_substitution(&strategy);
             prefixed_formula refined_game(m);
             refined_game.m_qt = m_qt;

@@ -24,7 +24,7 @@
 //using namespace qe;
 using namespace qe::rareqs;
 
-std::ostream& prn_strategy(std::ostream& o,
+std::ostream& qe::rareqs::prn_strategy(std::ostream& o,
     app_ref_vector const& vars, expr_substitution& strategy) {
     expr *  def;
     proof * pr;
@@ -63,33 +63,57 @@ public:
             model_smt2_pp(tout << "model\n", m, mdl, 2); tout << "\n";
             );
 
-        expr_ref val(vars.m());
-        for (unsigned i = 0; i < vars.size(); ++i) {
-            mdl.eval(vars.get(i), val, true);
-            strategy.insert(vars.get(i), val);
-        }
 
         mbp aux(m);
         expr_ref_vector lits(m);
         lits.push_back(fml);
         aux.extract_literals(mdl, lits);
-        reduce_equalities(mdl, vars, lits, strategy);
 
+        expr_ref_vector defs_dom(m);
+        expr_ref_vector defs_rng(m);
+        expr_mark is_rem;
+        reduce_equalities(mdl, vars, lits, defs_dom, defs_rng, is_rem);
 
-        TRACE("qe",
-            prn_strategy(tout << "mk_strategy out:\n", vars, strategy) << "\n";);
+        expr_ref val(vars.m());
+        for (unsigned i = 0; i < vars.size(); ++i) {
+            expr_ref v(vars.get(i), m);
+            if (is_rem.is_marked(v)) continue;
+            mdl.eval(v, val, true);
+            add_to_strategy(v, val, defs_dom, defs_rng);
+        }
+
+        for (unsigned di = 0; di < defs_rng.size(); ++di) {
+            strategy.insert(defs_dom.get(di), defs_rng.get(di));
+        }
+        //if (reduced)
+        //filter(is_rem, vars);
+
+        TRACE("qe", prn_strategy(tout << "mk_strategy out:\n", vars, strategy) << "\n";);
     }
 
     ~impl() {
     }
 
+    void add_to_strategy(const expr_ref& v, const expr_ref& t,
+            /*out*/expr_ref_vector& defs_dom, /*out*/expr_ref_vector& defs_rng) {
+        expr_safe_replace sub(m);
+        sub.insert(v, t);
+        expr_ref tmp(m);
+        for (unsigned di = 0; di < defs_rng.size(); ++di) {
+            sub(defs_rng.get(di), tmp);
+            m_rw(tmp);
+            defs_rng[di] = tmp;
+        }
+        defs_dom.push_back(v);
+        defs_rng.push_back(t);
+    }
+
     bool reduce_equalities(model& mdl, app_ref_vector const& vars, expr_ref_vector& lits,
-            /*out*/expr_substitution& strategy) {
-        TRACE("qe",
-            tout << "reduce_equalities in: " << "vars: " << vars << "\nlits: \n" << lits << "\n";
-            model_smt2_pp(tout << "mdl\n", m, mdl, 2); tout << "\n";
-            );
-        expr_mark is_var, is_rem;
+        /*out*/expr_ref_vector& defs_dom, /*out*/expr_ref_vector& defs_rng,
+        /*out*/expr_mark& is_rem) {
+        TRACE("qe", tout << "reduce_equalities in: " << "vars: " << vars << "\nlits: \n" << lits << "\n";
+                    model_smt2_pp(tout << "mdl\n", m, mdl, 2); tout << "\n";);
+        expr_mark is_var;
         if (vars.empty())
             return false;
         bool reduced = false;
@@ -104,18 +128,16 @@ public:
                 continue;
             reduced = true;
             project_plugin::erase(lits, i);
+            add_to_strategy(v, t, defs_dom, defs_rng);
+            is_rem.mark(v);
             expr_safe_replace sub(m);
             sub.insert(v, t);
-            strategy.insert(v, t);
-            is_rem.mark(v);
             for (unsigned j = 0; j < lits.size(); ++j) {
                 sub(lits[j].get(), tmp);
                 m_rw(tmp);
                 lits[j] = tmp;
             }
         }
-        //if (reduced)
-            //filter(is_rem, vars);
         return reduced;
     }
 
@@ -128,6 +150,7 @@ public:
             if (!cont(r)) {
                 v = to_app(l);
                 t = r;
+                TRACE("qe", tout << "eq: " << mk_pp(l, m) << " := " << t << "\n";);
                 return true;
             }
         }
