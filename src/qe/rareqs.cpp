@@ -486,13 +486,13 @@ namespace rareqs {
             hoist.pull_quantifier(false/*existential*/, game.m_f, vars);
             free_vars->append(vars);
             vars.reset();
-            const bool no_top_exists = free_vars->empty();
-            if (no_top_exists) {
+            const bool no_top_existentials = free_vars->empty();
+            if (no_top_existentials) {
                 hoist.pull_quantifier(true/*universal*/, game.m_f, vars);
                 free_vars->append(vars);
                 vars.reset();
             }
-            game.m_qt = no_top_exists && free_vars->size() ? universal : existential;
+            game.m_qt = no_top_existentials && free_vars->size() ? universal : existential;
             quantifier_type qt = game.m_qt;
             while (1) {
                 qt = opponent(qt);
@@ -562,7 +562,10 @@ namespace rareqs {
             game.m_f = r;
 
 
+
+            TRACE("qe", tout << "free vars game: " << *(free_vars.get()) << "\n";);
             TRACE("qe", game.display(tout << "top game: ") << "\n";);
+
             rareqs_solver rs(m, top_qt, m_stats);
             rs.add_free_vars(free_vars);
             rs.add_game(game);
