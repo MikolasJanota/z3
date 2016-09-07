@@ -14,15 +14,66 @@
 
  Revision History:
 --*/
-#include "qe_strategy.h"
-#include "qe_mbp.h"
-#include "model_smt2_pp.h"
-#include "ast_pp.h"
-#include "th_rewriter.h"
-#include "expr_safe_replace.h"
-#include "expr_functors.h"
+#include"qe_strategy.h"
+#include"qe_mbp.h"
+#include"model_smt2_pp.h"
+#include"ast_pp.h"
+#include"th_rewriter.h"
+#include"expr_safe_replace.h"
+#include"expr_functors.h"
+#include"obj_pair_hashtable.h"
 //using namespace qe;
 using namespace qe::rareqs;
+
+struct strategy_maker {
+    strategy_maker(th_rewriter& rw)
+        : m_rw(rw), m_dom(rw.m()), m_rng(rw.m()), m_sub(rw.m())  {}
+    expr_ref_vector m_dom;
+    expr_ref_vector m_rng;
+    expr_mark       m_is_def;
+    expr_mark       m_can_def;
+    expr_safe_replace m_sub;
+
+    th_rewriter&    m_rw;
+
+    bool is_defined(expr *  v) const {
+         return m_is_def.is_marked(v);
+    }
+
+    bool can_def(expr *  v) const {
+        return m_can_def.is_marked(v) && !is_defined(v);
+    }
+
+    void add_definable(expr * v) {
+        m_can_def.mark(v);
+    }
+
+    void add(const expr_ref& v, const expr_ref& t) {
+        expr_safe_replace sub(m_dom.m());
+        sub.insert(v, t);
+        expr_ref tmp(m_dom.m());
+        for (unsigned di = 0; di < m_rng.size(); ++di) {
+            sub(m_rng.get(di), tmp);
+            m_rw(tmp);
+            m_rng[di] = tmp;
+        }
+        m_dom.push_back(v);
+        m_rng.push_back(t);
+        m_is_def.mark(v.get());
+        m_sub.insert(v, t);
+    }
+
+    void sub(expr * v, expr_ref& e) {
+        m_sub(v, e);
+    }
+
+    void mk(expr_substitution& strategy) {
+        SASSERT(m_rng.size() == m_dom.size());
+        for (unsigned di = 0; di < m_rng.size(); ++di) {
+            strategy.insert(m_dom.get(di), m_rng.get(di));
+        }
+    }
+};
 
 std::ostream& qe::rareqs::prn_strategy(std::ostream& o,
     app_ref_vector const& vars, expr_substitution& strategy) {
@@ -69,22 +120,22 @@ public:
         lits.push_back(fml);
         aux.extract_literals(mdl, lits);
 
-        expr_ref_vector defs_dom(m);
-        expr_ref_vector defs_rng(m);
-        expr_mark is_rem;
-        reduce_equalities(mdl, vars, lits, defs_dom, defs_rng, is_rem);
+        strategy_maker st_mk(m_rw);
+        for (unsigned i = 0; i < vars.size(); ++i)
+            st_mk.add_definable(vars.get(i));
+        if (vars.size()) {
+            reduce_equalities(mdl, lits, st_mk);
+        }
 
         expr_ref val(vars.m());
         for (unsigned i = 0; i < vars.size(); ++i) {
             expr_ref v(vars.get(i), m);
-            if (is_rem.is_marked(v)) continue;
+            if (st_mk.is_defined(v)) continue;
             mdl.eval(v, val, true);
-            add_to_strategy(v, val, defs_dom, defs_rng);
+            st_mk.add(v, val);
         }
 
-        for (unsigned di = 0; di < defs_rng.size(); ++di) {
-            strategy.insert(defs_dom.get(di), defs_rng.get(di));
-        }
+        st_mk.mk(strategy);
         //if (reduced)
         //filter(is_rem, vars);
 
@@ -94,46 +145,22 @@ public:
     ~impl() {
     }
 
-    void add_to_strategy(const expr_ref& v, const expr_ref& t,
-            /*out*/expr_ref_vector& defs_dom, /*out*/expr_ref_vector& defs_rng) {
-        expr_safe_replace sub(m);
-        sub.insert(v, t);
-        expr_ref tmp(m);
-        for (unsigned di = 0; di < defs_rng.size(); ++di) {
-            sub(defs_rng.get(di), tmp);
-            m_rw(tmp);
-            defs_rng[di] = tmp;
-        }
-        defs_dom.push_back(v);
-        defs_rng.push_back(t);
-    }
 
-    bool reduce_equalities(model& mdl, app_ref_vector const& vars, expr_ref_vector& lits,
-        /*out*/expr_ref_vector& defs_dom, /*out*/expr_ref_vector& defs_rng,
-        /*out*/expr_mark& is_rem) {
-        TRACE("qe", tout << "reduce_equalities in: " << "vars: " << vars << "\nlits: \n" << lits << "\n";
-                    model_smt2_pp(tout << "mdl\n", m, mdl, 2); tout << "\n";);
-        expr_mark is_var;
-        if (vars.empty())
-            return false;
+    bool reduce_equalities(model& mdl, expr_ref_vector& lits, /*in/out*/strategy_maker& st_mk) {
+//        TRACE("qe", tout << "reduce_equalities in: " << "vars: " << vars << "\nlits: \n" << lits << "\n";
+  //                  model_smt2_pp(tout << "mdl\n", m, mdl, 2); tout << "\n";);
         bool reduced = false;
-        for (unsigned i = 0; i < vars.size(); ++i)
-            is_var.mark(vars.get(i));
 
         expr_ref tmp(m), t(m), v(m);
         for (unsigned i = 0; i < lits.size(); ++i) {
             expr* const e = lits[i].get();
             expr *l, *r;
-            if (!m.is_eq(e, l, r) || !reduce_eq(is_var, l, r, v, t))
+            if (!m.is_eq(e, l, r) || !mk_eq(l, r, st_mk))
                 continue;
             reduced = true;
             project_plugin::erase(lits, i);
-            add_to_strategy(v, t, defs_dom, defs_rng);
-            is_rem.mark(v);
-            expr_safe_replace sub(m);
-            sub.insert(v, t);
             for (unsigned j = 0; j < lits.size(); ++j) {
-                sub(lits[j].get(), tmp);
+                st_mk.sub(lits[j].get(), tmp);
                 m_rw(tmp);
                 lits[j] = tmp;
             }
@@ -141,11 +168,41 @@ public:
         return reduced;
     }
 
-    bool reduce_eq(expr_mark& is_var, expr* l, expr* r, expr_ref& v, expr_ref& t) {
-        if (is_var.is_marked(r)) {
+    typedef std::pair<expr*, expr*> epair;
+
+    bool mk_eq(expr* top_l, expr* top_r, strategy_maker& st_mk) {
+        vector<epair> todo;
+        todo.push_back(std::make_pair(top_l, top_r));
+        expr_ref v(m), t(m);
+        obj_pair_hashtable<expr, expr> mark;
+        while (todo.size()) {
+            const epair ep = todo.back();
+            expr * const l = ep.first;
+            expr * const r = ep.second;
+            todo.pop_back();
+            if (mark.contains(ep)) continue;
+            mark.insert(ep);
+            if (m.are_equal(l, r)) continue;
+            if (reduce_eq(st_mk, l, r, v, t)) {
+                st_mk.add(v, t);
+                continue;
+            }
+            if (!is_app(l) || !is_app(r)) return false;
+            app * const la = to_app(l);
+            app * const ra = to_app(r);
+            if (la->get_kind() != ra->get_kind() || la->get_num_args() != ra->get_num_args())
+                return false;
+            for (unsigned i = 0; ra->get_num_args(); ++i)
+                todo.push_back(std::make_pair(la->get_arg(i), ra->get_arg(i)));
+        }
+        return true;
+    }
+
+    bool reduce_eq(strategy_maker& st_mk, expr* l, expr* r, expr_ref& v, expr_ref& t) {
+        if (st_mk.can_def(r)) {
             std::swap(l, r);
         }
-        if (is_var.is_marked(l)) {
+        if (st_mk.can_def(l)) {
             contains_app cont(m, to_app(l));
             if (!cont(r)) {
                 v = to_app(l);
