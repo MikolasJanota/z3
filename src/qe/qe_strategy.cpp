@@ -192,7 +192,7 @@ public:
             app * const ra = to_app(r);
             if (la->get_kind() != ra->get_kind() || la->get_num_args() != ra->get_num_args())
                 return false;
-            for (unsigned i = 0; ra->get_num_args(); ++i)
+            for (unsigned i = 0; i < ra->get_num_args(); ++i)
                 todo.push_back(std::make_pair(la->get_arg(i), ra->get_arg(i)));
         }
         return true;
