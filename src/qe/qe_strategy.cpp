@@ -49,9 +49,11 @@ struct strategy_maker {
     }
 
     void add(const expr_ref& v, const expr_ref& t) {
-        expr_safe_replace sub(m_dom.m());
+        ast_manager& m = m_dom.m();
+        TRACE("qe", tout << "set def: \n" << mk_pp(v, m, 2) << "\n" << mk_pp(t.get(), m, 2) << "\n" ;);
+        expr_safe_replace sub(m);
         sub.insert(v, t);
-        expr_ref tmp(m_dom.m());
+        expr_ref tmp(m);
         for (unsigned di = 0; di < m_rng.size(); ++di) {
             sub(m_rng.get(di), tmp);
             m_rw(tmp);
@@ -175,10 +177,13 @@ public:
         todo.push_back(std::make_pair(top_l, top_r));
         expr_ref v(m), t(m);
         obj_pair_hashtable<expr, expr> mark;
-        while (todo.size()) {
+        bool retv = true;
+        while (todo.size() && retv) {
             const epair ep = todo.back();
             expr * const l = ep.first;
             expr * const r = ep.second;
+            TRACE("qe", tout << "mk_eq: \n" << mk_pp(l, m, 2) << "\n" << mk_pp(r, m, 2) << "\n";);
+
             todo.pop_back();
             if (mark.contains(ep)) continue;
             mark.insert(ep);
@@ -187,15 +192,21 @@ public:
                 st_mk.add(v, t);
                 continue;
             }
-            if (!is_app(l) || !is_app(r)) return false;
+            if (!is_app(l) || !is_app(r)) {
+                retv = false;
+                continue;
+            }
             app * const la = to_app(l);
             app * const ra = to_app(r);
-            if (la->get_kind() != ra->get_kind() || la->get_num_args() != ra->get_num_args())
-                return false;
+            if (la->get_kind() != ra->get_kind() || la->get_num_args() != ra->get_num_args()) {
+                retv = false;
+                continue;
+            }
             for (unsigned i = 0; i < ra->get_num_args(); ++i)
                 todo.push_back(std::make_pair(la->get_arg(i), ra->get_arg(i)));
         }
-        return true;
+        TRACE("qe", tout << "mk_eq result: \n" << (retv ? "true" : "false") << "\n";);
+        return retv;
     }
 
     bool reduce_eq(strategy_maker& st_mk, expr* l, expr* r, expr_ref& v, expr_ref& t) {

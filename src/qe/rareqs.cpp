@@ -42,6 +42,18 @@
 
 #include"model_smt2_pp.h"
 
+///////////////////
+#include"tactical.h"
+#include"simplify_tactic.h"
+#include"propagate_values_tactic.h"
+#include"solve_eqs_tactic.h"
+#include"distribute_forall_tactic.h"
+#include"der_tactic.h"
+#include"reduce_args_tactic.h"
+#include"nnf_tactic.h"
+
+
+
 namespace qe {
 namespace rareqs {
     /**
@@ -125,7 +137,7 @@ namespace rareqs {
         }
 
         solver * mk_solver() {
-            return 0 ? mk_inc_sat_solver(m, m_params) : mk_smt_solver(m, m_params, symbol::null);
+            return 1 ? mk_inc_sat_solver(m, m_params) : mk_smt_solver(m, m_params, symbol::null);
         }
 
     };
@@ -623,6 +635,44 @@ namespace rareqs {
 };
 };
 
-tactic * mk_rareqs_tactic(ast_manager& m, params_ref const& p) {
-    return alloc(qe::rareqs::rareqs, m, p);
+
+tactic * mk_actuall_rareqs_tactic(ast_manager& m, params_ref const& p) {
+  return alloc(qe::rareqs::rareqs, m, p);
+}
+
+tactic * mk_der_fp_tactic_(ast_manager & m, params_ref const & p) {
+    return repeat(and_then(mk_der_tactic(m), mk_simplify_tactic(m, p)));
+}
+
+//tactic * mk_rareqs_preamble(ast_manager & m, params_ref const & p) {
+//    params_ref no_elim_and(p);
+//    no_elim_and.set_bool("elim_and", false);
+//
+//    return and_then(
+//        mk_trace_tactic("rareqs_pre"),
+//        and_then(mk_simplify_tactic(m, p),
+//            mk_propagate_values_tactic(m, p),
+////            and_then(using_params(mk_macro_finder_tactic(m, no_elim_and), no_elim_and), mk_simplify_tactic(m, p)),
+//            //and_then(mk_snf_tactic(m, p), mk_simplify_tactic(m, p)),
+//            //mk_elim_and_tactic(m, p),
+//            mk_solve_eqs_tactic(m, p),
+//            and_then(mk_der_fp_tactic_(m, p), mk_simplify_tactic(m, p)),
+//            and_then(mk_distribute_forall_tactic(m, p), mk_simplify_tactic(m, p))),
+//        and_then(and_then(mk_reduce_args_tactic(m, p), mk_simplify_tactic(m, p)),
+////          and_then(mk_macro_finder_tactic(m, p), mk_simplify_tactic(m, p)),
+////          and_then(mk_ufbv_rewriter_tactic(m, p), mk_simplify_tactic(m, p)),
+////          and_then(mk_quasi_macros_tactic(m, p), mk_simplify_tactic(m, p)),
+//            and_then(mk_der_fp_tactic_(m, p), mk_simplify_tactic(m, p)),
+//            mk_simplify_tactic(m, p)),
+//        mk_trace_tactic("rareqs_post"));
+//}
+
+tactic * mk_rareqs_tactic(ast_manager& m, params_ref const& p) {    
+    return mk_actuall_rareqs_tactic(m, p);
+    //tactic * t = and_then(repeat(mk_rareqs_preamble(m, p), 2),
+    //    mk_actuall_rareqs_tactic(m,p ));
+
+    //t->updt_params(p);
+
+    //return t;
 }
