@@ -37,6 +37,9 @@
 #include "th_rewriter.h"
 #include "inc_sat_solver.h"
 
+#include "push_antecedent.h"
+
+
 #include "nnf.h"
 #include "nnf_params.hpp"
 
@@ -559,6 +562,7 @@ namespace rareqs {
 
             var_block_ref free_vars(alloc(var_block,m));          
             const quantifier_type top_qt = hoist(free_vars, game);
+            (push_antecedent(m))(game.m_f.get(), game.m_f);
 
             params_ref nnf_p;
             nnf_p.copy(m_params);
