@@ -205,7 +205,7 @@ public:
             for (unsigned i = 0; i < ra->get_num_args(); ++i)
                 todo.push_back(std::make_pair(la->get_arg(i), ra->get_arg(i)));
         }
-        TRACE("qe", tout << "mk_eq result: \n" << (retv ? "true" : "false") << "\n";);
+        TRACE("qe", tout << "mk_eq result: " << (retv ? "true" : "false") << "\n";);
         return retv;
     }
 

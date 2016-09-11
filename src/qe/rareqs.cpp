@@ -140,7 +140,7 @@ namespace rareqs {
         }
 
         solver * mk_solver() {
-            return 1 ? mk_inc_sat_solver(m, m_params) : mk_smt_solver(m, m_params, symbol::null);
+            return 0 ? mk_inc_sat_solver(m, m_params) : mk_smt_solver(m, m_params, symbol::null);
         }
 
     };
@@ -562,7 +562,7 @@ namespace rareqs {
 
             var_block_ref free_vars(alloc(var_block,m));          
             const quantifier_type top_qt = hoist(free_vars, game);
-            (push_antecedent(m))(game.m_f.get(), game.m_f);
+            (propagate_antecedent(m))(game.m_f.get(), game.m_f);
 
             params_ref nnf_p;
             nnf_p.copy(m_params);

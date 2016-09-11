@@ -3,7 +3,7 @@
 
  Module Name:
 
-  push_antecedent.h
+  propagate_antecedent.h
 
  Abstract:
 
@@ -22,12 +22,12 @@
 #include "model_based_opt.h"
 #include "expr_functors.h"
 namespace qe {
-    class push_antecedent {
+    class propagate_antecedent {
         class impl;
         impl * m_impl;
     public:
-        push_antecedent(ast_manager& m);
-        ~push_antecedent();
+        propagate_antecedent(ast_manager& m);
+        ~propagate_antecedent();
         bool operator()(expr * src, expr_ref& dst);
     };
 }

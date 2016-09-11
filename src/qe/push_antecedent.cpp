@@ -3,7 +3,7 @@
 
  Module Name:
 
-  push_antecedent.cpp
+  propagate_antecedent.cpp
 
  Abstract:
 
@@ -17,16 +17,25 @@
 #include "push_antecedent.h"
 #include "expr_replacer.h"
 #include "ast_util.h"
+#include "ast_pp.h"
 
 using namespace qe;
 
-class push_antecedent::impl {
+class propagate_antecedent::impl {
     ast_manager& m;
 public:
     impl(ast_manager& m) : m(m) {}
     ~impl() {}
 
     bool operator () (expr * src, expr_ref& dst) {
+        const bool retv = run(src, dst);
+        TRACE("propagate_antecedent", tout << mk_pp(src, m, 2) << "\n--->\n"; 
+                                      if (retv) tout << mk_pp(dst.get(), m, 2) << "\n";
+                                      else tout << "\n unchanged\n"; );
+        return retv;
+    }
+
+    bool run(expr * src, expr_ref& dst) {
         expr *lhs, *rhs;
         dst = src;
         if (!m.is_implies(src, lhs, rhs)) return false;
@@ -51,18 +60,12 @@ public:
     }
 
     bool find_defs(expr * lhs, expr_ref_vector& dom, expr_ref_vector& rng) {
+        expr_ref_vector conjuncts(m);
+        flatten_and(lhs, conjuncts);
         app_ref v(m);
         expr_ref t(m);
-        if (is_def(lhs, v, t)) {
-            dom.push_back(v);
-            dom.push_back(t);
-            return true;
-        }
-        if (!m.is_and(lhs)) return false;
-        app * const a = to_app(lhs);
-
-        for (unsigned i = 0; i < a->get_num_args(); ++i) {
-            if (!is_def(a->get_arg(i), v, t)) continue;
+        for (unsigned i = 0; i < conjuncts.size(); ++i) {
+            if (!is_def(conjuncts.get(i), v, t)) continue;
             dom.push_back(v);
             rng.push_back(t);
         }
@@ -79,21 +82,21 @@ public:
             subst.insert(dom.get(i), rng.get(i));
             scoped_ptr<expr_replacer> er = mk_default_expr_replacer(m);
             er->set_substitution(&subst);
-            (*er)(out.get(), out);
+            (*er)(out.get(), tmp);
             out = tmp;
         }
         return true;
     }
 };
 
-push_antecedent::push_antecedent(ast_manager& m) {
+propagate_antecedent::propagate_antecedent(ast_manager& m) {
     m_impl = alloc(impl, m);
 }
 
-push_antecedent::~push_antecedent() {
+propagate_antecedent::~propagate_antecedent() {
     dealloc(m_impl);
 }
 
-bool push_antecedent::operator()(expr * src, expr_ref& dst) {
+bool propagate_antecedent::operator()(expr * src, expr_ref& dst) {
     return (*m_impl)(src, dst);
 }
